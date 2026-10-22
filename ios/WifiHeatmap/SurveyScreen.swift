@@ -35,7 +35,8 @@ struct SurveyScreen: View {
             ZStack(alignment: .topTrailing) {
                 PlanCanvas(survey: model.survey, metric: model.metric, thresholds: thresholds,
                            heat: showHeat ? model.heat : nil, live: model.livePos, heading: model.heading,
-                           selected: selected?.id, showLabels: showLabels, interactive: true) { p, scale in
+                           selected: selected?.id, showLabels: showLabels, interactive: true,
+                           planImage: model.planImage, alignMark: model.alignFirst?.plan) { p, scale in
                     handleTap(p, scale)
                 }
                 ARPreview(session: model.session)
@@ -106,6 +107,9 @@ struct SurveyScreen: View {
                 Toggle(isOn: $showLabels) { Label("Show values", systemImage: "textformat.123") }
                 Divider()
                 Button { newName = model.survey.name; renaming = true } label: { Label("Rename", systemImage: "pencil") }
+                if model.survey.planImageFile != nil {
+                    Button { model.restartAlignment() } label: { Label("Re-align plan", systemImage: "arrow.triangle.2.circlepath") }
+                }
                 Button { showSettings = true } label: { Label("Settings", systemImage: "gearshape") }
                 Button(role: .destructive) { confirmClear = true } label: { Label("Delete all points", systemImage: "trash") }
             } label: {
@@ -140,7 +144,7 @@ struct SurveyScreen: View {
                         .frame(maxWidth: .infinity, minHeight: 36)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.busy || !model.trackingOK)
+                .disabled(model.busy || !model.trackingOK || model.needsAlignment)
                 .layoutPriority(1)
 
                 Button { aligning.toggle() } label: {
@@ -152,7 +156,7 @@ struct SurveyScreen: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(aligning ? .orange : .gray)
-                .disabled(!model.trackingOK)
+                .disabled(!model.trackingOK || model.needsAlignment)
             }
         }
         .padding(12)
@@ -160,7 +164,19 @@ struct SurveyScreen: View {
     }
 
     @ViewBuilder private var statusView: some View {
-        if let p = model.progressText {
+        if model.needsAlignment {
+            VStack(alignment: .leading, spacing: 3) {
+                if model.alignFirst == nil {
+                    Text("Align step 1 of 2").font(.headline)
+                    Text("Stand in a spot you can find on the plan (a doorway or room corner) and tap it.")
+                } else {
+                    Text("Align step 2 of 2").font(.headline)
+                    Text("Walk to another spot at least 3–4 m away, as far as possible, and tap it.")
+                }
+                if let m = model.alignMessage { Text(m).font(.caption).foregroundColor(.orange) }
+                if !model.trackingOK { Text(model.trackingText).font(.caption).foregroundColor(.secondary) }
+            }
+        } else if let p = model.progressText {
             VStack(alignment: .leading, spacing: 2) {
                 Text(p).font(.title3.bold())
                 Text("Hold still").font(.caption).foregroundColor(.secondary)
@@ -210,6 +226,10 @@ struct SurveyScreen: View {
     // MARK: Actions
 
     private func handleTap(_ p: Vec2, _ scale: CGFloat) {
+        if model.needsAlignment {
+            model.alignTap(p)
+            return
+        }
         if aligning {
             model.align(to: p)
             aligning = false
@@ -233,7 +253,7 @@ struct SurveyScreen: View {
         let width: CGFloat = 1200
         let planH = min(2000, max(600, width * b.height / b.width))
         let view = ExportView(survey: model.survey, metric: model.metric, thresholds: thresholds,
-                              heat: model.heat, showLabels: showLabels)
+                              heat: model.heat, showLabels: showLabels, planImage: model.planImage)
             .frame(width: width, height: planH + 110)
             .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: view)
@@ -307,12 +327,13 @@ struct ExportView: View {
     let thresholds: Thresholds
     let heat: HeatLayer?
     let showLabels: Bool
+    var planImage: UIImage?
 
     var body: some View {
         let ok = survey.points.filter { !$0.failed }
         VStack(spacing: 0) {
             PlanCanvas(survey: survey, metric: metric, thresholds: thresholds, heat: heat,
-                       showLabels: showLabels, interactive: false)
+                       showLabels: showLabels, interactive: false, planImage: planImage)
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(survey.name) — \(metric.title)").font(.system(size: 26, weight: .bold))

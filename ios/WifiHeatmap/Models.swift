@@ -66,6 +66,17 @@ struct Survey: Codable, Identifiable {
     var points: [Sample] = []
     var trail: [Vec2] = []
     var hasWorldMap = false
+    /// Floor plan image (non-LiDAR phones). Image top-left sits at plan (0, 0).
+    var planImageFile: String?
+    var imagePixels: Vec2?
+    var metersPerPixel: Double?
+    /// True until the 2-point alignment has linked the camera position to the image.
+    var needsAlignment: Bool?
+
+    var imageRect: CGRect? {
+        guard planImageFile != nil, let px = imagePixels, let mpp = metersPerPixel else { return nil }
+        return CGRect(x: 0, y: 0, width: px.x * mpp, height: px.y * mpp)
+    }
 
     func toPlan(worldX x: Double, z: Double) -> Vec2 {
         Vec2(x: x, y: z).rotated(by: rotation) + offset
@@ -83,8 +94,11 @@ struct Survey: Codable, Identifiable {
         trail.forEach { add($0) }
         if let s = start { add(s) }
         if let e = extra { add(e) }
+        if let r = imageRect {
+            add(Vec2(x: Double(r.minX), y: Double(r.minY))); add(Vec2(x: Double(r.maxX), y: Double(r.maxY)))
+        }
         guard minX.isFinite else { return CGRect(x: -3, y: -3, width: 6, height: 6) }
-        let pad = 1.0
+        let pad = imageRect == nil ? 1.0 : 0.3
         let w = max(4, maxX - minX + 2 * pad), h = max(4, maxY - minY + 2 * pad)
         let cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
         return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)

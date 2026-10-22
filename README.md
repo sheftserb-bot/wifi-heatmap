@@ -9,7 +9,7 @@ Both use the same `server.py` for pure Wi-Fi measurements.
 
 ## Native app
 
-**Needs:** iPhone with LiDAR (12 Pro or newer Pro/Pro Max) for scanning, iOS 17+. Without LiDAR you can still survey on a blank grid with position tracking.
+**Needs:** iOS 17+. Room scanning needs LiDAR (12 Pro or newer Pro/Pro Max). Any other iPhone (e.g. iPhone 14) uses a **floor plan image** instead: pick it from Photos, then align it with two taps (see below). Position tracking works on all of them.
 
 ### Build without a Mac
 Every push to `main` that touches `ios/` makes GitHub Actions build the app on a Mac in the cloud (`.github/workflows/ios-build.yml`). Open the repo's **Actions** tab → latest run → download **WifiHeatmap-unsigned-ipa**. You can also start a build by hand with **Run workflow**.
@@ -30,7 +30,8 @@ With a Mac instead: `brew install xcodegen`, `cd ios && xcodegen generate`, open
 3. Switch **Down / Up / Ping** at the top. Tap a point for details or to delete it.
 4. If the dot is in the wrong place, press **I'm here** and tap your real position.
 5. **⋯** menu: share the heat map image, export JSON/CSV, measure by tapping the plan, settings.
-6. Re-opening a survey later: walk around the scanned area with the camera up until it finds its position, then continue.
+6. **Floor plan image (no LiDAR):** *Survey on a floor plan image* → pick the image. Stand at a spot you can find on the plan (doorway, room corner) and tap it. Walk at least 3–4 m to another recognisable spot and tap it. The app works out scale, rotation and position from those two taps; then the blue dot follows you. *Re-align plan* in the ⋯ menu starts over.
+7. Re-opening a survey later: walk around the scanned area with the camera up until it finds its position, then continue.
 
 Settings → *Local server* takes the address `server.py` prints (e.g. `192.168.1.20:8080`).
 

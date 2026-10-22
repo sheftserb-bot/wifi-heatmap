@@ -1,3 +1,4 @@
+import PhotosUI
 import RoomPlan
 import SwiftUI
 
@@ -30,6 +31,8 @@ struct HomeView: View {
     @EnvironmentObject var store: SurveyStore
     @State var flow: Flow?
     @State var showSettings = false
+    @State var pickedPlan: PhotosPickerItem?
+    @State var importError: String?
 
     var body: some View {
         NavigationStack {
@@ -43,11 +46,14 @@ struct HomeView: View {
                         Text("This iPhone has no LiDAR scanner. You can still survey without a floor plan.")
                             .font(.footnote).foregroundColor(.secondary)
                     }
+                    PhotosPicker(selection: $pickedPlan, matching: .images) {
+                        Label("Survey on a floor plan image", systemImage: "photo.on.rectangle")
+                    }
                     Button { flow = .blank } label: {
                         Label("Survey without a scan", systemImage: "figure.walk")
                     }
                 } footer: {
-                    Text("Scan first, then walk around: your position is tracked on the plan and each spot gets a speed test.")
+                    Text("Your position is tracked with the camera while you walk, and each spot gets a speed test. A floor plan image can be a screenshot, a photo of a printed plan or a hand sketch.")
                 }
 
                 Section("Surveys") {
@@ -68,11 +74,49 @@ struct HomeView: View {
                 Button { showSettings = true } label: { Image(systemName: "gearshape") }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .onChange(of: pickedPlan) {
+                guard let item = pickedPlan else { return }
+                pickedPlan = nil
+                Task { await importPlan(item) }
+            }
+            .alert("Couldn't use that image", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(importError ?? "") }
             .fullScreenCover(item: $flow) { f in
                 FlowView(flow: f) { flow = nil }
                     .environmentObject(store)
             }
         }
+    }
+}
+
+extension HomeView {
+    /// Saves the picked image (downscaled) and opens a new survey that starts with alignment.
+    func importPlan(_ item: PhotosPickerItem) async {
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let img = UIImage(data: data) else {
+            importError = "The image could not be loaded."
+            return
+        }
+        let maxSide: CGFloat = 2400
+        let k = min(1, maxSide / max(img.size.width, img.size.height))
+        let size = CGSize(width: (img.size.width * k).rounded(), height: (img.size.height * k).rounded())
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        let scaled = UIGraphicsImageRenderer(size: size, format: fmt).image { _ in
+            UIColor.white.setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+            img.draw(in: CGRect(origin: .zero, size: size))
+        }
+        guard let jpg = scaled.jpegData(compressionQuality: 0.85) else { importError = "The image could not be saved."; return }
+        var s = Survey(name: "Survey " + Date().formatted(date: .abbreviated, time: .shortened))
+        guard let file = store.saveImage(jpg, for: s.id) else { importError = "The image could not be saved."; return }
+        s.planImageFile = file
+        s.imagePixels = Vec2(x: Double(size.width), y: Double(size.height))
+        s.metersPerPixel = 15.0 / Double(max(size.width, size.height))   // rough guess until aligned
+        s.needsAlignment = true
+        store.save(s)
+        flow = .open(s)
     }
 }
 
@@ -84,6 +128,7 @@ struct SurveyRow: View {
             HStack {
                 Text(survey.name).font(.headline)
                 if survey.plan != nil { Image(systemName: "square.split.bottomrightquarter").foregroundColor(.secondary) }
+                if survey.planImageFile != nil { Image(systemName: "photo").foregroundColor(.secondary) }
             }
             Text("\(survey.points.count) points · median ↓ \(fmt(median(ok.compactMap { $0.down }))) Mbps · \(survey.created.formatted(date: .abbreviated, time: .omitted))")
                 .font(.caption).foregroundColor(.secondary)

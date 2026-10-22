@@ -29,6 +29,8 @@ struct PlanCanvas: View {
     var selected: UUID?
     var showLabels = true
     var interactive = true
+    var planImage: UIImage?
+    var alignMark: Vec2?
     var onTap: ((Vec2, CGFloat) -> Void)?
 
     @State var zoom: CGFloat = 1
@@ -73,8 +75,16 @@ struct PlanCanvas: View {
         let paper = Color(.secondarySystemBackground)
         ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(paper))
 
+        // Floor plan image
+        if let img = planImage, let r = survey.imageRect {
+            let o = tf.view(Vec2(x: Double(r.minX), y: Double(r.minY)))
+            let rect = CGRect(x: o.x, y: o.y, width: r.width * tf.scale, height: r.height * tf.scale)
+            ctx.fill(Path(rect), with: .color(.white))
+            ctx.draw(Image(uiImage: img).interpolation(.high), in: rect)
+        }
+
         // Metre grid when there is no scanned plan
-        if (survey.plan?.walls.isEmpty ?? true) && tf.scale > 6 {
+        if (survey.plan?.walls.isEmpty ?? true) && survey.imageRect == nil && tf.scale > 6 {
             let tl = tf.plan(.zero), br = tf.plan(CGPoint(x: size.width, y: size.height))
             var grid = Path()
             var x = floor(tl.x)
@@ -152,6 +162,15 @@ struct PlanCanvas: View {
                 ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(.white.opacity(0.85)))
                 ctx.draw(txt, at: CGPoint(x: box.minX + 4, y: pt.y), anchor: .leading)
             }
+        }
+
+        // First alignment spot
+        if let a = alignMark {
+            let c = tf.view(a)
+            let r = CGRect(x: c.x - 11, y: c.y - 11, width: 22, height: 22)
+            ctx.fill(Path(ellipseIn: r), with: .color(.orange))
+            ctx.stroke(Path(ellipseIn: r), with: .color(.white), lineWidth: 2)
+            ctx.draw(Text("1").font(.system(size: 13, weight: .heavy)).foregroundColor(.white), at: c)
         }
 
         // You are here

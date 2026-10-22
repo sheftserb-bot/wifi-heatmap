@@ -24,6 +24,13 @@ final class SurveyStore: ObservableObject {
     func jsonURL(_ id: UUID) -> URL { dir.appendingPathComponent("\(id.uuidString).json") }
     func worldMapURL(_ id: UUID) -> URL { dir.appendingPathComponent("\(id.uuidString).worldmap") }
 
+    func imageURL(_ name: String) -> URL { dir.appendingPathComponent(name) }
+
+    func saveImage(_ data: Data, for id: UUID) -> String? {
+        let name = "\(id.uuidString).jpg"
+        do { try data.write(to: imageURL(name), options: .atomic); return name } catch { return nil }
+    }
+
     func save(_ s: Survey) {
         if let data = try? JSONEncoder().encode(s) {
             try? data.write(to: jsonURL(s.id), options: .atomic)
@@ -35,6 +42,7 @@ final class SurveyStore: ObservableObject {
     func delete(_ s: Survey) {
         try? FileManager.default.removeItem(at: jsonURL(s.id))
         try? FileManager.default.removeItem(at: worldMapURL(s.id))
+        if let f = s.planImageFile { try? FileManager.default.removeItem(at: imageURL(f)) }
         surveys.removeAll { $0.id == s.id }
     }
 }
