@@ -100,6 +100,15 @@ input[type=text]{width:100%}
   <button class="btn" data-act="close">Cancel</button>
 </div></div>
 
+<!-- Scale sheet -->
+<div class="sheet" id="shScale"><div class="card">
+  <h2>Distance between the two points</h2>
+  <div class="muted">Metres (e.g. 4.5) or feet (e.g. 15ft)</div>
+  <div class="row"><input type="text" id="inDist" inputmode="decimal" placeholder="e.g. 4.5 or 15ft"></div>
+  <button class="btn primary" data-act="applyScale">Set scale</button>
+  <button class="btn" data-act="cancelScale">Cancel</button>
+</div></div>
+
 <!-- Point sheet -->
 <div class="sheet" id="shPoint"><div class="card">
   <h2>Measurement</h2>
@@ -212,7 +221,7 @@ async function loadPlanFile(file) {
   g.drawImage(im, 0, 0, c.width, c.height);
   resetSurveyGeometry();
   await setPlanURL(c.toDataURL('image/jpeg', 0.85));
-  savePlan(); save(); fit(); setTool('scale');
+  savePlan(); save(); fit(); setTool('start');
 }
 function useBlankGrid() {
   resetSurveyGeometry();
@@ -403,21 +412,25 @@ cv.addEventListener('click', e => {
   }
 });
 function onScaleTap(x, y) {
+  if (tmpScale.length >= 2) tmpScale = [];
   tmpScale.push({ x, y });
   render();
   if (tmpScale.length < 2) { flash('Now tap the other end.'); return; }
-  setTimeout(() => {
-    const ans = prompt('Real distance between the two points?\nMetres (e.g. 4.5) or feet (e.g. 15ft)', '');
-    const m = parseDistance(ans);
-    if (m) {
-      const [a, b] = tmpScale, px = Math.hypot(a.x - b.x, a.y - b.y);
-      S.pxPerM = px / m; S.scalePts = tmpScale; S.scaleM = m; save();
-      flash(`Scale set: ${m.toFixed(2)} m.`);
-      tmpScale = [];
-      setTool(S.start ? 'measure' : 'start');
-    } else { tmpScale = []; flash('Scale not set. Tap two points again.'); render(); }
-  }, 50);
+  $('#inDist').value = '';
+  openSheet('#shScale');
+  setTimeout(() => $('#inDist').focus(), 300);
 }
+function applyScale() {
+  const m = parseDistance($('#inDist').value);
+  if (!m || tmpScale.length < 2) { $('#inDist').focus(); return; }
+  const [a, b] = tmpScale, px = Math.hypot(a.x - b.x, a.y - b.y);
+  S.pxPerM = px / m; S.scalePts = tmpScale; S.scaleM = m; save();
+  tmpScale = [];
+  openSheet(null);
+  setTool(S.start ? 'measure' : 'start');
+  flash(`Scale set: ${m.toFixed(2)} m.`);
+}
+function cancelScale() { tmpScale = []; openSheet(null); render(); idleStatus(); }
 function parseDistance(s) {
   if (!s) return null;
   const t = String(s).trim().toLowerCase().replace(',', '.');
@@ -552,11 +565,11 @@ function idleStatus() {
   if (!S.planKind) return setStatusHTML('<div>Load a floor plan to begin.</div>');
   if (tool === 'scale') {
     const cur = S.pxPerM ? `<div class="sub">Current scale: ${S.scaleM.toFixed(2)} m line. Optional, but it makes the map more accurate.</div>` : '<div class="sub">Optional, but it makes the heat spread realistically.</div>';
-    return setStatusHTML(`<div>Tap both ends of something you know the length of (a wall, a door).</div>${cur}`);
+    return setStatusHTML(`<div><b>Scale:</b> tap both ends of something you know the length of (a wall, a door).</div>${cur}`);
   }
-  if (tool === 'start') return setStatusHTML('<div>Tap where you are starting the survey (e.g. by the router or front door).</div>');
+  if (tool === 'start') return setStatusHTML('<div><b>Step 1:</b> tap the plan where you are standing now (start point).</div><div class="sub">Optional first: 📏 Scale. Then measuring begins.</div>');
   const ok = S.points.filter(p => !p.fail);
-  if (!S.points.length) return setStatusHTML(`<div>Stand at a spot, tap it on the plan, hold still ~${S.secs * 2 + 2} s.</div><div class="sub">Tip: every 3–5 m, and in every room. Tap a point to retest or delete it.</div>`);
+  if (!S.points.length) return setStatusHTML(`<div><b>Step 2:</b> stand still and tap your spot on the plan. A test runs ~${S.secs * 2 + 2} s.</div><div class="sub">Then walk 3–5 m, stop, tap again. The heat map fills in as you go.</div>`);
   const md = median(ok.map(p => p.down).filter(v => v != null)), mu = median(ok.map(p => p.up).filter(v => v != null)), ml = median(ok.map(p => p.lat).filter(v => v != null));
   const worst = ok.length ? ok.reduce((a, b) => (norm(S.metric, valOf(a)) <= norm(S.metric, valOf(b)) ? a : b)) : null;
   const dead = S.points.length - ok.length;
@@ -687,6 +700,8 @@ document.addEventListener('click', e => {
   else if (act === 'pickPlan') { if (confirmReplace()) { openSheet(null); $('#planFile').click(); } }
   else if (act === 'blankGrid') { if (confirmReplace()) { openSheet(null); useBlankGrid(); } }
   else if (act === 'importJson') { $('#jsonFile').click(); }
+  else if (act === 'applyScale') applyScale();
+  else if (act === 'cancelScale') cancelScale();
   else if (act === 'exportPng') exportPng();
   else if (act === 'exportJson') exportJson();
   else if (act === 'exportCsv') exportCsv();
@@ -705,6 +720,7 @@ document.querySelectorAll('nav button[data-tool]').forEach(b => b.addEventListen
 }));
 document.querySelectorAll('#metricSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.m; save(); render(); idleStatus(); }));
 $('#planFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadPlanFile(f); });
+$('#inDist').addEventListener('keydown', e => { if (e.key === 'Enter') applyScale(); });
 $('#jsonFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importJson(f); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && busy) keepAwake(); });
 
