@@ -1,0 +1,6 @@
+ios/build/
+ios/Payload/
+ios/*.xcodeproj/
+*.ipa
+__pycache__/
+.DS_Store
