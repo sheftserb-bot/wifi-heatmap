@@ -6,6 +6,9 @@ on:
     paths: ["ios/**", ".github/workflows/ios-build.yml"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -46,6 +49,18 @@ jobs:
         with:
           name: WifiHeatmap-unsigned-ipa
           path: ios/WifiHeatmap-unsigned.ipa
+
+      - name: Publish as a release (direct download link)
+        working-directory: ios
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp WifiHeatmap-unsigned.ipa WifiHeatmap.ipa
+          gh release create "build-${{ github.run_number }}" WifiHeatmap.ipa \
+            --repo "${{ github.repository }}" \
+            --title "WiFi Map build ${{ github.run_number }}" \
+            --notes "Unsigned iPhone app. Install with Sideloadly. Commit ${{ github.sha }}." \
+            --latest
 
       - name: Upload build log
         if: always()
