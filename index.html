@@ -115,7 +115,7 @@ input[type=text]{width:100%}
   <div class="muted">After the “WiFi Signal” shortcut has run, come back here and tap the button. iPhone then shows a small “Paste” bubble: tap it.</div>
   <button class="btn primary" data-act="pasteSig">Read signal</button>
   <div class="muted" style="margin-top:12px">If that doesn't work: long-press the box below → Paste → Use.</div>
-  <div class="row"><input type="text" id="inSig" placeholder="-58" autocomplete="off" autocapitalize="off"></div>
+  <div class="row"><textarea id="inSig" rows="5" placeholder="Long-press here → Paste" autocomplete="off" autocapitalize="off" style="width:100%;font:inherit;font-size:16px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)"></textarea></div>
   <button class="btn" data-act="useSig">Use</button>
   <button class="btn" data-act="runSigAgain">Run shortcut again</button>
   <button class="btn" data-act="cancelSig">Cancel</button>
@@ -662,11 +662,12 @@ async function pasteSig() {
     const sig = parseSig(t);
     if (!sig) { $('#pasteMsg').textContent = 'No signal reading on the clipboard. Run the shortcut again (it must include Copy to Clipboard).'; return; }
     applySignal(sig);
-  } catch (e) { $('#pasteMsg').textContent = 'Could not read the clipboard. Use the box below: long-press → Paste → Use.'; }
+  } catch (e) { $('#pasteMsg').textContent = 'iPhone did not allow reading the clipboard (' + (e && e.name || 'error') + '). Use the box below: long-press → Paste → Use.'; }
 }
 function useSig() {
   const sig = parseSig($('#inSig').value);
-  if (!sig) { $('#pasteMsg').textContent = 'That is not a signal reading (expected a number like -58).'; return; }
+  if (!$('#inSig').value.trim()) { $('#pasteMsg').textContent = 'The box is empty. Long-press inside it → Paste, then tap Use.'; return; }
+  if (!sig) { $('#pasteMsg').textContent = 'That is not a signal reading. It should start with a number like -48.'; return; }
   applySignal(sig);
 }
 function cancelSig() { clearPend(); openSheet(null); render(); idleStatus(); }
