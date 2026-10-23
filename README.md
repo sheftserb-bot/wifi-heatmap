@@ -65,6 +65,21 @@ Now every test measures only the phone ↔ router Wi-Fi link.
 5. Switch between **Down / Up / Ping** at the top. Tap a point to retest or delete it.
 6. **More → Share heat map image** to save or send a PNG. **Save survey file** keeps everything (plan included) as a `.json` you can open later.
 
+### Wi-Fi signal (dBm) on iPhone
+iPhone doesn't let web pages or regular apps read Wi-Fi signal strength. The **Shortcuts** app can ("Get Network Details" → RSSI), so the web app uses a small shortcut named exactly **WiFi Signal** that outputs:
+
+`WIFISIG;<RSSI>;<Noise>;<Channel Number>;<BSSID>;<Network Name>`
+
+Build it: Get Network Details (Wi-Fi) ×5 → RSSI, Noise, Channel Number, BSSID, Network Name → Text (the line above, with the variables) → Copy to Clipboard → Stop and Output (Text).
+
+In the app: **More → What to measure → Signal (dBm) only** or **Signal + speed**, then tap spots as usual.
+- In **Safari**: tap spot → "Open in Shortcuts?" → Open → it comes back with the reading by itself.
+- In the **Home Screen** app: tap spot → shortcut runs → tap ◀ back (top left) → **Read signal** → **Paste**.
+
+Guide: −50 dBm or better excellent, −67 good (enough for calls), −75 fair, below −80 weak.
+
+Distances are in **feet** by default (`24.9`, `24'10.5"`); add `m` for metres.
+
 ### Notes
 - iOS does not allow web or regular apps to read Wi-Fi signal strength (dBm), so this measures real throughput and latency instead.
 - A spot where the server cannot be reached at all is saved as a dead spot (red ✕).

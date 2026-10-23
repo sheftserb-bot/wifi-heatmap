@@ -19,7 +19,7 @@ body{display:flex;flex-direction:column;height:100vh;height:100dvh;-webkit-user-
 header{display:flex;align-items:center;gap:8px;padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;background:var(--panel);border-bottom:1px solid var(--line)}
 header h1{font-size:17px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seg{display:flex;background:var(--chip);border-radius:9px;padding:2px}
-.seg button{border:0;background:transparent;color:var(--text);padding:6px 10px;border-radius:7px;font:inherit;font-size:13px}
+.seg button{border:0;background:transparent;color:var(--text);padding:6px 8px;border-radius:7px;font:inherit;font-size:13px}
 .seg button.on{background:var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.18);font-weight:600}
 #wrap{flex:1;position:relative;min-height:0;display:flex}
 #view{flex:1;overflow:auto;position:relative;-webkit-overflow-scrolling:touch}
@@ -61,7 +61,7 @@ input[type=text]{width:100%}
 <header>
   <h1 id="title">WiFi Heatmap</h1>
   <div class="seg" id="metricSeg">
-    <button data-m="down">↓ Down</button><button data-m="up">↑ Up</button><button data-m="lat">Ping</button>
+    <button data-m="down">↓ Down</button><button data-m="up">↑ Up</button><button data-m="lat">Ping</button><button data-m="sig">dBm</button>
   </div>
 </header>
 
@@ -103,10 +103,23 @@ input[type=text]{width:100%}
 <!-- Scale sheet -->
 <div class="sheet" id="shScale"><div class="card">
   <h2>Distance between the two points</h2>
-  <div class="muted">Metres (e.g. 4.5) or feet (e.g. 15ft)</div>
-  <div class="row"><input type="text" id="inDist" inputmode="decimal" placeholder="e.g. 4.5 or 15ft"></div>
+  <div class="muted">In feet: 24.9 or 24'10.5". For metres add m: 7.5m</div>
+  <div class="row"><input type="text" id="inDist" placeholder="e.g. 24.9 or 24'10.5&quot;" autocomplete="off" autocapitalize="off"></div>
   <button class="btn primary" data-act="applyScale">Set scale</button>
   <button class="btn" data-act="cancelScale">Cancel</button>
+</div></div>
+
+<!-- Signal paste sheet (Home Screen app) -->
+<div class="sheet" id="shPaste"><div class="card">
+  <h2>Read Wi-Fi signal</h2>
+  <div class="muted">After the “WiFi Signal” shortcut has run, come back here and tap the button. iPhone then shows a small “Paste” bubble: tap it.</div>
+  <button class="btn primary" data-act="pasteSig">Read signal</button>
+  <div class="muted" style="margin-top:12px">If that doesn't work: long-press the box below → Paste → Use.</div>
+  <div class="row"><input type="text" id="inSig" placeholder="WIFISIG;…" autocomplete="off" autocapitalize="off"></div>
+  <button class="btn" data-act="useSig">Use</button>
+  <button class="btn" data-act="runSigAgain">Run shortcut again</button>
+  <button class="btn" data-act="cancelSig">Cancel</button>
+  <div class="muted" id="pasteMsg" style="color:var(--danger)"></div>
 </div></div>
 
 <!-- Point sheet -->
@@ -130,6 +143,9 @@ input[type=text]{width:100%}
   <button class="btn" data-act="importJson">Open survey file</button>
 
   <h3>Test</h3>
+  <div class="row"><label>What to measure</label>
+    <select id="inMode"><option value="speed">Speed only</option><option value="sig">Signal (dBm) only</option><option value="both">Signal + speed</option></select></div>
+  <div class="muted">Signal (dBm) needs the free “WiFi Signal” shortcut in the Shortcuts app (see instructions).</div>
   <div class="row"><label>Test server</label>
     <select id="inServer"><option value="auto">Auto</option><option value="local">Local server (Wi-Fi only)</option><option value="cloudflare">Internet (Cloudflare)</option></select></div>
   <div class="row"><label>Seconds per test (down / up)</label>
@@ -144,6 +160,7 @@ input[type=text]{width:100%}
   <div class="row"><label>Download Mbps</label><input type="number" id="thDownBad" inputmode="decimal"><input type="number" id="thDownGood" inputmode="decimal"></div>
   <div class="row"><label>Upload Mbps</label><input type="number" id="thUpBad" inputmode="decimal"><input type="number" id="thUpGood" inputmode="decimal"></div>
   <div class="row"><label>Ping ms</label><input type="number" id="thLatBad" inputmode="decimal"><input type="number" id="thLatGood" inputmode="decimal"></div>
+  <div class="row"><label>Signal dBm</label><input type="text" id="thSigBad" inputmode="decimal"><input type="text" id="thSigGood" inputmode="decimal"></div>
 
   <h3>Reset</h3>
   <button class="btn danger" data-act="clearPoints">Clear all points</button>
@@ -154,24 +171,29 @@ input[type=text]{width:100%}
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
-const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1';
-const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 } };
+const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
+const FT = 0.3048;
+const SHORTCUT = 'WiFi Signal';
+const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
   down: { name: 'Download', unit: 'Mbps', key: 'down' },
   up:   { name: 'Upload',   unit: 'Mbps', key: 'up' },
-  lat:  { name: 'Ping',     unit: 'ms',   key: 'lat' }
+  lat:  { name: 'Ping',     unit: 'ms',   key: 'lat' },
+  sig:  { name: 'Signal',   unit: 'dBm',  key: 'rssi' }
 };
+const ftOf = m => m / FT;
+const fmtFt = m => { const f = ftOf(m); return (f < 100 ? f.toFixed(1) : Math.round(f).toString()) + ' ft'; };
 const clone = o => JSON.parse(JSON.stringify(o));
 
 let S = {
   name: 'My survey', planKind: null, w: 0, h: 0,
   pxPerM: null, scalePts: null, scaleM: null, start: null, points: [],
-  metric: 'down', showHeat: true, showLabels: true, server: 'auto', secs: 3, th: clone(DEF_TH)
+  metric: 'down', showHeat: true, showLabels: true, server: 'auto', secs: 3, th: clone(DEF_TH), mode: 'speed'
 };
 let planImg = null, planURL = null;
 let tool = 'measure', zoom = 1, busy = false, pending = null, tmpScale = [];
 let heatCache = null, heatKey = '';
-let selPoint = null, wakeLock = null;
+let selPoint = null, wakeLock = null, pendSig = null;
 
 const view = $('#view'), stage = $('#stage'), cv = $('#cv'), ctx = cv.getContext('2d');
 
@@ -241,10 +263,14 @@ function ramp(t) {
   return RAMP[RAMP.length - 1][1];
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function valOf(p, m = S.metric) { if (p.fail) return null; const v = p[METRIC[m].key]; return (v == null || !isFinite(v)) ? null : v; }
+/* dead = no connection for this metric; hasData = point counts for this metric's map */
+function isDead(p, m = S.metric) { return m === 'sig' ? !!p.noWifi : !!p.fail; }
+function valOf(p, m = S.metric) { if (isDead(p, m)) return null; const v = p[METRIC[m].key]; return (v == null || !isFinite(v)) ? null : v; }
+function hasData(p, m = S.metric) { return isDead(p, m) || valOf(p, m) != null; }
 function norm(m, v) {
   if (v == null) return 0;
   const th = S.th[m];
+  if (m === 'sig') return clamp((v - th.bad) / (th.good - th.bad || 1), 0, 1);
   if (m === 'lat') return clamp((th.bad - v) / (th.bad - th.good || 1), 0, 1);
   const lb = Math.log(Math.max(th.bad, 0.01)), lg = Math.log(Math.max(th.good, 0.02));
   return clamp((Math.log(Math.max(v, 0.01)) - lb) / (lg - lb || 1), 0, 1);
@@ -252,21 +278,23 @@ function norm(m, v) {
 function fmt(v, m) {
   if (v == null || !isFinite(v)) return '–';
   if (m === 'lat') return v < 10 ? v.toFixed(1) : Math.round(v).toString();
+  if (m === 'sig') return Math.round(v).toString();
   return v < 10 ? v.toFixed(1) : Math.round(v).toString();
 }
 const rgb = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
 
 /* ---------- heat map ---------- */
 function getHeat() {
-  if (!S.points.length) return null;
-  const key = JSON.stringify([S.metric, S.points.map(p => [p.x, p.y, valOf(p)]), S.th[S.metric], S.w, S.h, S.pxPerM]);
+  const use = S.points.filter(p => hasData(p));
+  if (!use.length) return null;
+  const key = JSON.stringify([S.metric, use.map(p => [p.x, p.y, valOf(p), isDead(p)]), S.th[S.metric], S.w, S.h, S.pxPerM]);
   if (heatCache && key === heatKey) return heatCache;
   const cols = Math.max(40, Math.min(240, Math.round(S.w / 8)));
   const cell = S.w / cols, rows = Math.max(1, Math.ceil(S.h / cell));
   const oc = document.createElement('canvas'); oc.width = cols; oc.height = rows;
   const og = oc.getContext('2d'), id = og.createImageData(cols, rows), d = id.data;
-  const R = S.pxPerM ? S.pxPerM * 5 : Math.max(S.w, S.h) * 0.12;   // full-colour radius around points
-  const pts = S.points.map(p => ({ x: p.x, y: p.y, t: norm(S.metric, valOf(p)) }));
+  const R = S.pxPerM ? S.pxPerM * 5 : Math.max(S.w, S.h) * 0.12;   // full-colour radius (~16 ft) around points
+  const pts = use.map(p => ({ x: p.x, y: p.y, t: norm(S.metric, valOf(p)) }));
   for (let y = 0; y < rows; y++) {
     const cy = (y + 0.5) * cell;
     for (let x = 0; x < cols; x++) {
@@ -297,7 +325,7 @@ function drawScene(c, w, h, u, exporting) {
   else {
     c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h);
     c.strokeStyle = '#e6e9ee'; c.lineWidth = 1;
-    const step = S.pxPerM ? S.pxPerM : 50;
+    const step = S.pxPerM ? S.pxPerM * FT * 5 : 50;   // grid every 5 ft
     c.beginPath();
     for (let x = 0; x <= w; x += step) { c.moveTo(x, 0); c.lineTo(x, h); }
     for (let y = 0; y <= h; y += step) { c.moveTo(0, y); c.lineTo(w, y); }
@@ -314,7 +342,7 @@ function drawScene(c, w, h, u, exporting) {
     if (sp.length === 2) { c.beginPath(); c.moveTo(sp[0].x, sp[0].y); c.lineTo(sp[1].x, sp[1].y); c.stroke(); }
     c.setLineDash([]);
     sp.forEach(p => { c.beginPath(); c.arc(p.x, p.y, 6 * u, 0, Math.PI * 2); c.fill(); });
-    if (sp.length === 2 && S.scaleM && !tmpScale.length) label(c, `${S.scaleM.toFixed(2)} m`, (sp[0].x + sp[1].x) / 2, (sp[0].y + sp[1].y) / 2 - 12 * u, u, '#2563eb');
+    if (sp.length === 2 && S.scaleM && !tmpScale.length) label(c, fmtFt(S.scaleM), (sp[0].x + sp[1].x) / 2, (sp[0].y + sp[1].y) / 2 - 12 * u, u, '#2563eb');
     c.restore();
   }
   // start flag
@@ -329,12 +357,12 @@ function drawScene(c, w, h, u, exporting) {
   // points
   c.save();
   for (const p of S.points) {
-    const v = valOf(p), col = rgb(ramp(norm(S.metric, v)));
+    const v = valOf(p), has = hasData(p), col = has ? rgb(ramp(norm(S.metric, v))) : '#b8bec8';
     c.beginPath(); c.arc(p.x, p.y, 8 * u, 0, Math.PI * 2);
     c.fillStyle = col; c.fill(); c.lineWidth = 2.5 * u; c.strokeStyle = '#fff'; c.stroke();
     c.lineWidth = 1 * u; c.strokeStyle = 'rgba(0,0,0,.45)'; c.stroke();
     if (p === selPoint && !exporting) { c.beginPath(); c.arc(p.x, p.y, 13 * u, 0, Math.PI * 2); c.lineWidth = 2.5 * u; c.strokeStyle = '#2563eb'; c.stroke(); }
-    if (S.showLabels) label(c, p.fail ? '✕' : fmt(v, S.metric), p.x + 12 * u, p.y, u, '#111', 'left');
+    if (S.showLabels) label(c, isDead(p) ? '✕' : fmt(v, S.metric), p.x + 12 * u, p.y, u, has ? '#111' : '#8a909a', 'left');
   }
   c.restore();
   if (pending && !exporting) {
@@ -408,7 +436,7 @@ cv.addEventListener('click', e => {
     if (busy) return;
     const hit = S.points.find(p => Math.hypot(p.x - x, p.y - y) < 18 / zoom);
     if (hit) return openPoint(hit);
-    runTest(x, y, null);
+    measureAt(x, y, null);
   }
 });
 function onScaleTap(x, y) {
@@ -428,15 +456,23 @@ function applyScale() {
   tmpScale = [];
   openSheet(null);
   setTool(S.start ? 'measure' : 'start');
-  flash(`Scale set: ${m.toFixed(2)} m.`);
+  flash(`Scale set: ${fmtFt(m)}.`);
 }
 function cancelScale() { tmpScale = []; openSheet(null); render(); idleStatus(); }
+/* Feet by default: 24.9 · 24ft · 24' · 24'10.5" · 24'-10 1/2" · 24 ft 10 in. Metres only with "m": 7.5m */
 function parseDistance(s) {
   if (!s) return null;
-  const t = String(s).trim().toLowerCase().replace(',', '.');
-  const n = parseFloat(t);
-  if (!isFinite(n) || n <= 0) return null;
-  return /ft|feet|foot|'/.test(t) ? n * 0.3048 : n;
+  let t = String(s).trim().toLowerCase().replace(/,/g, '.').replace(/[’′]/g, "'").replace(/[”″]/g, '"');
+  const mm = t.match(/^(\d+(?:\.\d+)?)\s*(m|meter|meters|metre|metres)$/);
+  if (mm) { const v = parseFloat(mm[1]); return v > 0 ? v : null; }
+  const fi = t.match(/^(\d+(?:\.\d+)?)\s*(?:'|ft|feet|foot)?\s*-?\s*(?:(\d+(?:\.\d+)?)(?:\s+(\d+)\/(\d+))?\s*(?:"|in|inch|inches)?)?$/);
+  if (!fi) return null;
+  let feet = parseFloat(fi[1]);
+  let inches = fi[2] ? parseFloat(fi[2]) : 0;
+  if (fi[3] && fi[4] && +fi[4] > 0) inches += +fi[3] / +fi[4];
+  if (inches >= 12 && !/['"]|ft|in/.test(t)) return null;   // "24 30" is ambiguous
+  const total = feet + inches / 12;
+  return total > 0 ? total * FT : null;
 }
 
 /* ---------- speed testing ---------- */
@@ -542,8 +578,109 @@ async function runTest(x, y, existing) {
   else { res.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5); S.points.push(res); }
   pending = null; busy = false; save(); render();
   if (navigator.vibrate) navigator.vibrate(40);
-  showResult(res);
+  showResult(existing || res);
 }
+/* ---------- Wi-Fi signal (dBm) via the iPhone Shortcuts app ----------
+   iPhone does not let web pages (or normal apps) read Wi-Fi signal. The Shortcuts app can
+   ("Get Network Details" → RSSI). The shortcut returns "WIFISIG;rssi;noise;channel;bssid;ssid;tx;rx".
+   In Safari it comes straight back via x-success; in the Home Screen app it is read from the clipboard. */
+const isStandalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+const appURL = () => location.origin + location.pathname;
+function measureAt(x, y, existing) {
+  if ((S.mode || 'speed') === 'speed') return runTest(x, y, existing);
+  startSignal(x, y, existing ? existing.id : null);
+}
+function startSignal(x, y, id) {
+  pendSig = { x, y, id, t: Date.now() };
+  try { localStorage.setItem(KEYPEND, JSON.stringify(pendSig)); } catch (e) {}
+  pending = { x, y }; selPoint = null; render();
+  let url = 'shortcuts://x-callback-url/run-shortcut?name=' + encodeURIComponent(SHORTCUT);
+  if (isStandalone()) {
+    $('#inSig').value = ''; $('#pasteMsg').textContent = '';
+    openSheet('#shPaste');
+  } else {
+    url += '&x-success=' + encodeURIComponent(appURL() + '?sig=ok') +
+           '&x-cancel=' + encodeURIComponent(appURL() + '?sig=cancel') +
+           '&x-error=' + encodeURIComponent(appURL() + '?sig=error');
+    setStatusHTML('<div class="big">Opening Shortcuts…</div><div class="sub">Tap “Open” if Safari asks. It comes back here by itself.</div>');
+  }
+  location.href = url;
+}
+function parseSig(text) {
+  const t = String(text || '');
+  const i = t.toUpperCase().indexOf('WIFISIG');
+  if (i < 0) return null;
+  const parts = t.slice(i).split(/[;\n]/).map(x => x.trim());
+  parts.shift();
+  const num = x => { const m = String(x || '').replace(',', '.').match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : null; };
+  let rssi = num(parts[0]);
+  if (rssi != null && rssi > 0) rssi = -rssi;
+  if (rssi != null && (rssi < -120 || rssi >= 0)) rssi = null;
+  let noise = num(parts[1]); if (noise != null && noise > 0) noise = -noise;
+  return { rssi, noise, ch: num(parts[2]), bssid: parts[3] || '', ssid: parts[4] || '', tx: num(parts[5]), rx: num(parts[6]) };
+}
+function readPend() {
+  if (pendSig) return pendSig;
+  try { return JSON.parse(localStorage.getItem(KEYPEND) || 'null'); } catch (e) { return null; }
+}
+function clearPend() { pendSig = null; pending = null; try { localStorage.removeItem(KEYPEND); } catch (e) {} }
+function applySignal(sig) {
+  const pend = readPend();
+  if (!pend) { flash('No spot was waiting for a signal reading. Tap the spot again.'); return; }
+  let p = pend.id ? S.points.find(q => q.id === pend.id) : null;
+  if (!p) {
+    p = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), x: pend.x, y: pend.y, t: Date.now(),
+          down: null, up: null, lat: null, jit: null, fail: false };
+    S.points.push(p);
+  }
+  Object.assign(p, { rssi: sig.rssi, noise: sig.noise, ch: sig.ch, bssid: sig.bssid, ssid: sig.ssid,
+                     tx: sig.tx, rx: sig.rx, noWifi: sig.rssi == null, sigT: Date.now() });
+  if (S.mode !== 'both') p.t = Date.now();
+  clearPend(); openSheet(null); save(); render();
+  if (navigator.vibrate) navigator.vibrate(40);
+  if (S.mode === 'both' && !p.noWifi) runTest(p.x, p.y, p);
+  else showResult(p);
+}
+async function pasteSig() {
+  $('#pasteMsg').textContent = '';
+  try {
+    const t = await navigator.clipboard.readText();
+    const sig = parseSig(t);
+    if (!sig) { $('#pasteMsg').textContent = 'No signal reading on the clipboard. Run the shortcut again (it must end with Copy to Clipboard).'; return; }
+    applySignal(sig);
+  } catch (e) { $('#pasteMsg').textContent = 'Could not read the clipboard. Use the box below: long-press → Paste → Use.'; }
+}
+function useSig() {
+  const sig = parseSig($('#inSig').value);
+  if (!sig) { $('#pasteMsg').textContent = 'That text is not a signal reading (it should start with WIFISIG).'; return; }
+  applySignal(sig);
+}
+function cancelSig() { clearPend(); openSheet(null); render(); idleStatus(); }
+function handleSigReturn() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('sig')) return;
+  const status = q.get('sig'), result = q.get('result');
+  history.replaceState(null, '', appURL());
+  const pend = readPend();
+  if (status !== 'ok') { clearPend(); render(); flash(status === 'cancel' ? 'Signal reading cancelled.' : 'The shortcut failed. Check that “WiFi Signal” exists in Shortcuts.'); return; }
+  if (!pend || Date.now() - pend.t > 10 * 60 * 1000) { clearPend(); flash('That reading came back too late. Tap the spot again.'); return; }
+  const sig = parseSig(result);
+  if (!sig) { clearPend(); render(); flash('The shortcut returned no reading. Check its last step is “Stop and output” the WIFISIG text.'); return; }
+  applySignal(sig);
+}
+/* Another tab (Safari opens the reply in a new tab) may have saved newer data: reload it. */
+function reloadFromStorage() {
+  if (busy) return;
+  try {
+    const j = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!j) return;
+    const plan = localStorage.getItem(KEYPLAN);
+    S = Object.assign(S, j); S.th = Object.assign(clone(DEF_TH), j.th || {});
+    if (S.planKind === 'image' && plan && plan !== planURL) setPlanURL(plan).then(() => { render(); });
+    selPoint = null; heatKey = ''; render(); idleStatus();
+  } catch (e) {}
+}
+
 async function keepAwake() {
   try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch (e) {}
 }
@@ -554,26 +691,40 @@ let flashTimer = null;
 function flash(msg) { setStatusHTML(`<div>${esc(msg)}</div>`); clearTimeout(flashTimer); flashTimer = setTimeout(idleStatus, 4500); }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function median(a) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+function sigQuality(v) { return v == null ? '' : v >= -55 ? 'excellent' : v >= -67 ? 'good' : v >= -75 ? 'fair' : 'weak'; }
 function showResult(r) {
   clearTimeout(flashTimer);
-  if (r.fail) setStatusHTML(`<div class="big">✕ No connection here</div><div class="sub">Marked as a dead spot. Tap the next spot.</div>`);
-  else setStatusHTML(`<div class="big">↓ ${fmt(r.down)} &nbsp;↑ ${fmt(r.up)} Mbps &nbsp;· ${fmt(r.lat, 'lat')} ms</div><div class="sub">Point ${S.points.length} saved${r.err ? ' (partial: ' + esc(r.err) + ')' : ''}. Move and tap the next spot.</div>`);
+  const hasSpeed = r.down != null || r.up != null || r.lat != null || r.fail;
+  const sigTxt = r.noWifi ? '✕ No Wi-Fi' : (r.rssi != null ? `📶 ${fmt(r.rssi, 'sig')} dBm (${sigQuality(r.rssi)})` : '');
+  if (r.noWifi && !hasSpeed) setStatusHTML(`<div class="big">✕ No Wi-Fi here</div><div class="sub">Marked as a dead spot. Tap the next spot.</div>`);
+  else if (!hasSpeed) setStatusHTML(`<div class="big">${sigTxt}</div><div class="sub">Point ${S.points.length} saved${r.ch ? ' · ch ' + r.ch : ''}. Move and tap the next spot.</div>`);
+  else if (r.fail) setStatusHTML(`<div class="big">✕ No connection here${sigTxt ? ' · ' + sigTxt : ''}</div><div class="sub">Marked as a dead spot. Tap the next spot.</div>`);
+  else setStatusHTML(`<div class="big">${sigTxt ? sigTxt + ' · ' : ''}↓ ${fmt(r.down)} ↑ ${fmt(r.up)} Mbps · ${fmt(r.lat, 'lat')} ms</div><div class="sub">Point ${S.points.length} saved${r.err ? ' (partial: ' + esc(r.err) + ')' : ''}. Move and tap the next spot.</div>`);
   flashTimer = setTimeout(idleStatus, 8000);
 }
 function idleStatus() {
   if (busy) return;
   if (!S.planKind) return setStatusHTML('<div>Load a floor plan to begin.</div>');
   if (tool === 'scale') {
-    const cur = S.pxPerM ? `<div class="sub">Current scale: ${S.scaleM.toFixed(2)} m line. Optional, but it makes the map more accurate.</div>` : '<div class="sub">Optional, but it makes the heat spread realistically.</div>';
+    const cur = S.pxPerM ? `<div class="sub">Current scale: ${fmtFt(S.scaleM)} line. Optional, but it makes the map more accurate.</div>` : '<div class="sub">Optional, but it makes the heat spread realistically.</div>';
     return setStatusHTML(`<div><b>Scale:</b> tap both ends of something you know the length of (a wall, a door).</div>${cur}`);
   }
   if (tool === 'start') return setStatusHTML('<div><b>Step 1:</b> tap the plan where you are standing now (start point).</div><div class="sub">Optional first: 📏 Scale. Then measuring begins.</div>');
-  const ok = S.points.filter(p => !p.fail);
-  if (!S.points.length) return setStatusHTML(`<div><b>Step 2:</b> stand still and tap your spot on the plan. A test runs ~${S.secs * 2 + 2} s.</div><div class="sub">Then walk 3–5 m, stop, tap again. The heat map fills in as you go.</div>`);
-  const md = median(ok.map(p => p.down).filter(v => v != null)), mu = median(ok.map(p => p.up).filter(v => v != null)), ml = median(ok.map(p => p.lat).filter(v => v != null));
+  if (!S.points.length) {
+    const what = S.mode === 'sig' ? 'It opens Shortcuts to read the signal (~2 s).' : S.mode === 'both' ? 'It reads the signal, then runs a speed test.' : `A test runs ~${S.secs * 2 + 2} s.`;
+    return setStatusHTML(`<div><b>Step 2:</b> stand still and tap your spot on the plan. ${what}</div><div class="sub">Then walk 10–15 ft, stop, tap again. The heat map fills in as you go.</div>`);
+  }
+  const ok = S.points.filter(p => valOf(p) != null);
+  const sp = S.points.filter(p => !p.fail);
+  const md = median(sp.map(p => p.down).filter(v => v != null)), mu = median(sp.map(p => p.up).filter(v => v != null)), ml = median(sp.map(p => p.lat).filter(v => v != null));
+  const ms = median(S.points.filter(p => !p.noWifi).map(p => p.rssi).filter(v => v != null));
   const worst = ok.length ? ok.reduce((a, b) => (norm(S.metric, valOf(a)) <= norm(S.metric, valOf(b)) ? a : b)) : null;
-  const dead = S.points.length - ok.length;
-  setStatusHTML(`<div><b>${S.points.length}</b> points · median ↓ ${fmt(md)} ↑ ${fmt(mu)} Mbps · ${fmt(ml, 'lat')} ms</div>` +
+  const dead = S.points.filter(p => isDead(p)).length;
+  const parts = [];
+  if (ms != null) parts.push(`📶 ${fmt(ms, 'sig')} dBm`);
+  if (md != null || mu != null) parts.push(`↓ ${fmt(md)} ↑ ${fmt(mu)} Mbps`);
+  if (ml != null) parts.push(`${fmt(ml, 'lat')} ms`);
+  setStatusHTML(`<div><b>${S.points.length}</b> points · median ${parts.join(' · ')}</div>` +
     `<div class="sub">${dead ? dead + ' dead spot' + (dead > 1 ? 's' : '') + ' · ' : ''}${worst ? 'weakest ' + METRIC[S.metric].name.toLowerCase() + ': ' + fmt(valOf(worst), S.metric) + ' ' + METRIC[S.metric].unit : ''}</div>`);
 }
 function setTool(t) {
@@ -586,6 +737,7 @@ function updateLegend() {
   const m = METRIC[S.metric], th = S.th[S.metric];
   $('#lgTitle').textContent = `${m.name} (${m.unit})`;
   $('#lgBad').textContent = (S.metric === 'lat' ? '≥' : '≤') + th.bad;
+  if (S.metric === 'sig' && !S.points.some(p => hasData(p))) $('#lgTitle').textContent = 'Signal (dBm): no readings yet';
   $('#lgGood').textContent = (S.metric === 'lat' ? '≤' : '≥') + th.good;
   $('#legend').style.display = S.planKind && S.points.length ? 'block' : 'none';
   document.querySelector('.zoom').style.display = S.planKind ? 'flex' : 'none';
@@ -595,10 +747,21 @@ function openSheet(id) { document.querySelectorAll('.sheet').forEach(s => s.clas
 function openPoint(p) {
   selPoint = p; render();
   const lines = [];
-  if (p.fail) lines.push(['Status', 'No connection (dead spot)']);
-  lines.push(['Download', fmt(p.down) + ' Mbps'], ['Upload', fmt(p.up) + ' Mbps'], ['Ping', fmt(p.lat, 'lat') + ' ms'], ['Jitter', fmt(p.jit, 'lat') + ' ms']);
-  if (S.start && S.pxPerM) lines.push(['From start', (Math.hypot(p.x - S.start.x, p.y - S.start.y) / S.pxPerM).toFixed(1) + ' m']);
-  lines.push(['Tested', new Date(p.t).toLocaleString()], ['Server', p.server === 'local' ? 'Local' : 'Cloudflare']);
+  if (p.noWifi) lines.push(['Status', 'No Wi-Fi (dead spot)']);
+  else if (p.fail) lines.push(['Status', 'No connection (dead spot)']);
+  if (p.rssi != null) {
+    lines.push(['Signal', `${fmt(p.rssi, 'sig')} dBm (${sigQuality(p.rssi)})`]);
+    if (p.noise != null) lines.push(['Noise', `${fmt(p.noise, 'sig')} dBm`], ['SNR', `${Math.round(p.rssi - p.noise)} dB`]);
+    if (p.ch != null) lines.push(['Channel', String(p.ch) + (p.ch > 14 ? ' (5/6 GHz)' : ' (2.4 GHz)')]);
+    if (p.ssid) lines.push(['Network', p.ssid]);
+    if (p.bssid) lines.push(['Access point', p.bssid]);
+    if (p.tx != null || p.rx != null) lines.push(['Link rate', `↓ ${fmt(p.rx)} / ↑ ${fmt(p.tx)} Mbps`]);
+  }
+  if (p.down != null || p.up != null || p.lat != null || p.fail)
+    lines.push(['Download', fmt(p.down) + ' Mbps'], ['Upload', fmt(p.up) + ' Mbps'], ['Ping', fmt(p.lat, 'lat') + ' ms'], ['Jitter', fmt(p.jit, 'lat') + ' ms']);
+  if (S.start && S.pxPerM) lines.push(['From start', fmtFt(Math.hypot(p.x - S.start.x, p.y - S.start.y) / S.pxPerM)]);
+  lines.push(['Tested', new Date(p.t).toLocaleString()]);
+  if (p.server) lines.push(['Server', p.server === 'local' ? 'Local' : 'Cloudflare']);
   if (p.err) lines.push(['Note', p.err]);
   $('#ptInfo').innerHTML = lines.map(([k, v]) => `<span class="muted">${k}</span><b>${esc(v)}</b>`).join('');
   openSheet('#shPoint');
@@ -610,6 +773,8 @@ function openMenu() {
   $('#thDownBad').value = S.th.down.bad; $('#thDownGood').value = S.th.down.good;
   $('#thUpBad').value = S.th.up.bad; $('#thUpGood').value = S.th.up.good;
   $('#thLatBad').value = S.th.lat.bad; $('#thLatGood').value = S.th.lat.good;
+  $('#thSigBad').value = S.th.sig.bad; $('#thSigGood').value = S.th.sig.good;
+  $('#inMode').value = S.mode || 'speed';
   $('#serverInfo').textContent = 'Local = pure Wi-Fi speed to a computer on your network (run server.py). Internet = speed to Cloudflare, limited by your internet plan.' + (epMode ? ` Auto found: ${epMode === 'local' ? 'local server' : 'Cloudflare'}.` : '');
   openSheet('#shMenu');
 }
@@ -622,9 +787,12 @@ function readMenu() {
   S.th.down = { bad: num('#thDownBad', 10), good: num('#thDownGood', 300) };
   S.th.up = { bad: num('#thUpBad', 5), good: num('#thUpGood', 100) };
   S.th.lat = { bad: num('#thLatBad', 60), good: num('#thLatGood', 5) };
+  const neg = (id, d) => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) && v !== 0 ? -Math.abs(v) : d; };
+  S.th.sig = { bad: neg('#thSigBad', -80), good: neg('#thSigGood', -50) };
+  S.mode = $('#inMode').value;
   save(); render(); idleStatus();
 }
-['#inName', '#inServer', '#inSecs', '#inHeat', '#inLabels', '#thDownBad', '#thDownGood', '#thUpBad', '#thUpGood', '#thLatBad', '#thLatGood']
+['#inName', '#inServer', '#inSecs', '#inHeat', '#inLabels', '#thDownBad', '#thDownGood', '#thUpBad', '#thUpGood', '#thLatBad', '#thLatGood', '#thSigBad', '#thSigGood', '#inMode']
   .forEach(id => $(id).addEventListener('change', readMenu));
 
 /* ---------- export / import ---------- */
@@ -656,8 +824,14 @@ function exportPng() {
   g.fillText(`${S.name} — ${m.name} (${m.unit})`, pad, H + pad * 0.8);
   const ok = S.points.filter(p => !p.fail);
   const md = median(ok.map(p => p.down).filter(v => v != null)), mu = median(ok.map(p => p.up).filter(v => v != null)), ml = median(ok.map(p => p.lat).filter(v => v != null));
+  const ms = median(S.points.filter(p => !p.noWifi).map(p => p.rssi).filter(v => v != null));
+  const bits = [`${S.points.length} points · median`];
+  if (ms != null) bits.push(`signal ${fmt(ms, 'sig')} dBm ·`);
+  if (md != null || mu != null) bits.push(`↓ ${fmt(md)} / ↑ ${fmt(mu)} Mbps ·`);
+  if (ml != null) bits.push(`ping ${fmt(ml, 'lat')} ms ·`);
+  bits.push(new Date().toLocaleDateString());
   g.font = `400 ${fs * 0.85}px -apple-system, system-ui, sans-serif`; g.fillStyle = '#555';
-  g.fillText(`${S.points.length} points · median ↓ ${fmt(md)} / ↑ ${fmt(mu)} Mbps · ping ${fmt(ml, 'lat')} ms · ${new Date().toLocaleDateString()}`, pad, H + pad * 2.4);
+  g.fillText(bits.join(' '), pad, H + pad * 2.4);
   const lw = Math.min(W * 0.32, 420), lx = W - lw - pad, ly = H + pad * 1.0, lh = fs * 0.7;
   const grad = g.createLinearGradient(lx, 0, lx + lw, 0);
   RAMP.forEach(([t, col]) => grad.addColorStop(t, rgb(col)));
@@ -672,11 +846,13 @@ function exportJson() {
   shareFile(new Blob([JSON.stringify(data)], { type: 'application/json' }), `${fileBase()}.json`);
 }
 function exportCsv() {
-  const head = 'n,x_px,y_px,x_m,y_m,download_mbps,upload_mbps,ping_ms,jitter_ms,dead_spot,time,server';
+  const head = 'n,x_px,y_px,x_ft,y_ft,signal_dbm,noise_dbm,channel,bssid,ssid,download_mbps,upload_mbps,ping_ms,jitter_ms,no_wifi,speed_failed,time,server';
+  const q = v => /[",]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
   const rows = S.points.map((p, i) => [i + 1, p.x.toFixed(1), p.y.toFixed(1),
-    S.pxPerM ? (p.x / S.pxPerM).toFixed(2) : '', S.pxPerM ? (p.y / S.pxPerM).toFixed(2) : '',
+    S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '', S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '',
+    p.rssi ?? '', p.noise ?? '', p.ch ?? '', q(p.bssid || ''), q(p.ssid || ''),
     p.down?.toFixed(2) ?? '', p.up?.toFixed(2) ?? '', p.lat?.toFixed(1) ?? '', p.jit?.toFixed(1) ?? '',
-    p.fail ? 1 : 0, new Date(p.t).toISOString(), p.server || ''].join(','));
+    p.noWifi ? 1 : 0, p.fail ? 1 : 0, new Date(p.t).toISOString(), p.server || ''].join(','));
   shareFile(new Blob([[head, ...rows].join('\n')], { type: 'text/csv' }), `${fileBase()}.csv`);
 }
 async function importJson(file) {
@@ -705,12 +881,16 @@ document.addEventListener('click', e => {
   else if (act === 'exportPng') exportPng();
   else if (act === 'exportJson') exportJson();
   else if (act === 'exportCsv') exportCsv();
-  else if (act === 'retest') { const p = selPoint; openSheet(null); if (p && !busy) runTest(p.x, p.y, p); }
+  else if (act === 'retest') { const p = selPoint; openSheet(null); if (p && !busy) measureAt(p.x, p.y, p); }
+  else if (act === 'pasteSig') pasteSig();
+  else if (act === 'useSig') useSig();
+  else if (act === 'cancelSig') cancelSig();
+  else if (act === 'runSigAgain') { const pd = readPend(); if (pd) startSignal(pd.x, pd.y, pd.id); }
   else if (act === 'delPoint') { S.points = S.points.filter(p => p !== selPoint); selPoint = null; save(); openSheet(null); render(); idleStatus(); }
   else if (act === 'clearPoints') { if (confirm('Delete all measurement points?')) { S.points = []; save(); openSheet(null); render(); idleStatus(); } }
   else if (act === 'newSurvey') { if (confirm('Start a new survey? This clears the plan and all points.')) { resetSurveyGeometry(); S.planKind = null; S.name = 'My survey'; planImg = null; planURL = null; savePlan(); save(); openSheet(null); render(); idleStatus(); } }
 });
-document.querySelectorAll('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s) { openSheet(null); selPoint = null; render(); } }));
+document.querySelectorAll('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s && s.id !== 'shPaste') { openSheet(null); selPoint = null; render(); } }));
 document.querySelectorAll('nav button[data-tool]').forEach(b => b.addEventListener('click', () => {
   const t = b.dataset.tool;
   if (t === 'plan') return openSheet('#shPlan');
@@ -722,13 +902,22 @@ document.querySelectorAll('#metricSeg button').forEach(b => b.addEventListener('
 $('#planFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadPlanFile(f); });
 $('#inDist').addEventListener('keydown', e => { if (e.key === 'Enter') applyScale(); });
 $('#jsonFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importJson(f); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && busy) keepAwake(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (busy) keepAwake();
+  else if (!$('#shPaste').classList.contains('open') && !location.search.includes('sig=')) reloadFromStorage();
+});
+window.addEventListener('storage', e => { if (e.key === KEY && !busy) reloadFromStorage(); });
 
 (async () => {
   await loadState();
   if (S.planKind) { zoom = fitZoom(); }
   setTool(S.planKind ? (S.start ? 'measure' : 'start') : 'measure');
-  requestAnimationFrame(() => { if (S.planKind) fit(); });
+  requestAnimationFrame(() => { if (S.planKind) fit(); handleSigReturn(); });
+  if (!location.search.includes('sig=') && isStandalone()) {
+    const pd = readPend();                       // came back to the Home Screen app mid-reading
+    if (pd && Date.now() - pd.t < 10 * 60 * 1000) { pendSig = pd; pending = { x: pd.x, y: pd.y }; openSheet('#shPaste'); render(); }
+  }
 })();
 </script>
 </body>
