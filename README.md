@@ -71,7 +71,7 @@ iPhone doesn't let web pages or regular apps read Wi-Fi signal strength. The **S
 `WIFISIG;<RSSI>;<Noise>;<Channel Number>;<BSSID>;<Network Name>`
 
 Simplest version (signal only): **Get Network Details** (Wi-Fi → RSSI) → **Copy to Clipboard** → **Stop and Output**. The app accepts the bare number (e.g. `-58`).
-Full version (adds noise, channel, access point): Get Network Details ×5 → RSSI, Noise, Channel Number, BSSID, Network Name → Text with the line above → Copy to Clipboard → Stop and Output.
+Full version (adds noise, channel, access point), no variable picking needed: for each of RSSI, Noise, Channel Number, BSSID, Network Name add **Get Network Details** followed by **Add to Variable** (name `sig`); then **Get Variable** (`sig`) → **Combine Text** → **Copy to Clipboard** → **Stop and Output**. The app reads the five lines in that order.
 
 In the app: **More → What to measure → Signal (dBm) only** or **Signal + speed**, then tap spots as usual.
 - In **Safari**: tap spot → "Open in Shortcuts?" → Open → it comes back with the reading by itself.

@@ -618,10 +618,14 @@ function parseSig(text, allowEmpty) {
     return { rssi: v, noise: null, ch: null, bssid: '', ssid: '', tx: null, rx: null };
   }
   if (!t && allowEmpty) return { rssi: null };       // shortcut ran but found no Wi-Fi
+  let parts;
   const i = t.toUpperCase().indexOf('WIFISIG');
-  if (i < 0) return null;
-  const parts = t.slice(i).split(/[;\n]/).map(x => x.trim());
-  parts.shift();
+  if (i >= 0) { parts = t.slice(i).split(/[;\n\r]+/).map(x => x.trim()); parts.shift(); }
+  else {
+    // List from "Combine Text": RSSI, Noise, Channel, BSSID, Name — one per line or separated by ;
+    parts = t.split(/\s*(?:;|\r?\n)\s*/).map(x => x.trim());
+    if (parts.length < 2 || !/^-?\d+(?:[.,]\d+)?\s*(?:dbm)?$/i.test(parts[0])) return null;
+  }
   const num = x => { const m = String(x || '').replace(',', '.').match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : null; };
   let rssi = num(parts[0]);
   if (rssi != null && rssi > 0) rssi = -rssi;
