@@ -166,6 +166,7 @@ input[type=text]{width:100%}
   <button class="btn danger" data-act="clearPoints">Clear all points</button>
   <button class="btn danger" data-act="newSurvey">New survey (clear everything)</button>
   <button class="btn" data-act="close">Done</button>
+  <div class="muted" id="buildInfo" style="text-align:center;margin-top:10px"></div>
 </div></div>
 
 <script>
@@ -173,6 +174,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
+const BUILD = '20261023-1531';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -660,7 +662,11 @@ async function pasteSig() {
   try {
     const t = await navigator.clipboard.readText();
     const sig = parseSig(t);
-    if (!sig) { $('#pasteMsg').textContent = 'No signal reading on the clipboard. Run the shortcut again (it must include Copy to Clipboard).'; return; }
+    if (!sig) {
+      const peek = String(t || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      $('#pasteMsg').textContent = peek ? `The clipboard has “${peek}”, which is not a signal reading. Run the shortcut again.` : 'The clipboard is empty. Run the shortcut again (it must include Copy to Clipboard).';
+      return;
+    }
     applySignal(sig);
   } catch (e) { $('#pasteMsg').textContent = 'iPhone did not allow reading the clipboard (' + (e && e.name || 'error') + '). Use the box below: long-press → Paste → Use.'; }
 }
@@ -792,6 +798,7 @@ function openMenu() {
   $('#thSigBad').value = S.th.sig.bad; $('#thSigGood').value = S.th.sig.good;
   $('#inMode').value = S.mode || 'speed';
   $('#serverInfo').textContent = 'Local = pure Wi-Fi speed to a computer on your network (run server.py). Internet = speed to Cloudflare, limited by your internet plan.' + (epMode ? ` Auto found: ${epMode === 'local' ? 'local server' : 'Cloudflare'}.` : '');
+  $('#buildInfo').textContent = 'Version ' + BUILD;
   openSheet('#shMenu');
 }
 function readMenu() {
@@ -925,11 +932,29 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('storage', e => { if (e.key === KEY && !busy) reloadFromStorage(); });
 
+/* Home Screen apps keep an old copy for a while: check for a newer version and reload once. */
+async function checkUpdate() {
+  if (!location.protocol.startsWith('http') || busy || location.search.includes('sig=')) return;
+  try {
+    const r = await fetch(appURL() + '?check=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/const BUILD = '([^']+)'/);
+    if (m && m[1] !== BUILD) {
+      let tried = null; try { tried = sessionStorage.getItem('wifiheat.upd'); } catch (e) {}
+      if (tried === m[1]) return;
+      try { sessionStorage.setItem('wifiheat.upd', m[1]); } catch (e) {}
+      location.replace(appURL() + '?v=' + encodeURIComponent(m[1]));
+    }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
+
 (async () => {
+  if (/[?&](v|check)=/.test(location.search)) history.replaceState(null, '', appURL());
   await loadState();
   if (S.planKind) { zoom = fitZoom(); }
   setTool(S.planKind ? (S.start ? 'measure' : 'start') : 'measure');
   requestAnimationFrame(() => { if (S.planKind) fit(); handleSigReturn(); });
+  setTimeout(checkUpdate, 1500);
   if (!location.search.includes('sig=') && isStandalone()) {
     const pd = readPend();                       // came back to the Home Screen app mid-reading
     if (pd && Date.now() - pd.t < 10 * 60 * 1000) { pendSig = pd; pending = { x: pd.x, y: pd.y }; openSheet('#shPaste'); render(); }
