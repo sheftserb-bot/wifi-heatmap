@@ -230,7 +230,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
-const BUILD = '20261024-1354';
+const BUILD = '20261024-1356';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -416,15 +416,17 @@ function drawScene(c, w, h, u, exporting) {
   }
   // points
   c.save();
+  const labels = [];
   for (const p of S.points) {
     const v = valOf(p), has = hasData(p), col = has ? rgb(ramp(norm(S.metric, v))) : '#b8bec8';
     c.beginPath(); c.arc(p.x, p.y, 8 * u, 0, Math.PI * 2);
     c.fillStyle = col; c.fill(); c.lineWidth = 2.5 * u; c.strokeStyle = '#fff'; c.stroke();
     c.lineWidth = 1 * u; c.strokeStyle = 'rgba(0,0,0,.45)'; c.stroke();
     if (p === selPoint && !exporting) { c.beginPath(); c.arc(p.x, p.y, 13 * u, 0, Math.PI * 2); c.lineWidth = 2.5 * u; c.strokeStyle = '#2563eb'; c.stroke(); }
-    if (S.showLabels) label(c, (p.name ? p.name + '  ' : '') + (isDead(p) ? '✕' : fmt(v, S.metric)), p.x + 12 * u, p.y, u, has ? '#111' : '#8a909a', 'left');
+    if (S.showLabels) labels.push({ p, val: isDead(p) ? '✕' : fmt(v, S.metric), color: has ? '#111' : '#8a909a' });
   }
   c.restore();
+  if (labels.length) placeLabels(c, labels, u);
   // walked path and "you"
   if (S.trail && S.trail.length > 1) {
     c.save(); c.strokeStyle = 'rgba(37,99,235,.55)'; c.lineWidth = 3 * u; c.lineJoin = 'round'; c.lineCap = 'round';
@@ -448,6 +450,31 @@ function drawScene(c, w, h, u, exporting) {
     c.save(); c.beginPath(); c.arc(pending.x, pending.y, 11 * u, 0, Math.PI * 2);
     c.setLineDash([4 * u, 4 * u]); c.lineWidth = 3 * u; c.strokeStyle = '#2563eb'; c.stroke(); c.restore();
   }
+}
+/* Point labels without overlaps: try right, left, above, below; if nothing fits, show the value only. */
+function placeLabels(c, labels, u) {
+  c.save(); c.font = `700 ${13 * u}px -apple-system, system-ui, sans-serif`;
+  const h = 16 * u, gap = 12 * u, r = 10 * u;
+  const taken = S.points.map(p => ({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r }));
+  if (S.start) taken.push({ x: S.start.x - 2 * u, y: S.start.y - 28 * u, w: 20 * u, h: 30 * u });
+  const hit = b => taken.some(t => b.x < t.x + t.w && b.x + b.w > t.x && b.y < t.y + t.h && b.y + b.h > t.y);
+  const spots = (p, w) => [
+    { x: p.x + gap, y: p.y - h / 2, al: 'left' }, { x: p.x - gap - w, y: p.y - h / 2, al: 'left' },
+    { x: p.x - w / 2, y: p.y - gap - h, al: 'left' }, { x: p.x - w / 2, y: p.y + gap, al: 'left' }];
+  for (const L of labels) {
+    const full = (L.p.name ? L.p.name + '  ' : '') + L.val;
+    let done = false;
+    for (const txt of L.p.name ? [full, L.val] : [full]) {
+      const w = c.measureText(txt).width + 6 * u;
+      for (const sp of spots(L.p, w)) {
+        const b = { x: sp.x, y: sp.y, w, h };
+        if (!hit(b)) { taken.push(b); label(c, txt, sp.x + 3 * u, sp.y + h / 2, u, L.color, 'left'); done = true; break; }
+      }
+      if (done) break;
+    }
+    if (!done) label(c, L.val, L.p.x + gap, L.p.y, u, L.color, 'left');
+  }
+  c.restore();
 }
 function label(c, txt, x, y, u, color, align = 'center') {
   c.save(); c.font = `700 ${13 * u}px -apple-system, system-ui, sans-serif`; c.textAlign = align; c.textBaseline = 'middle';
@@ -481,7 +508,32 @@ function fitZoom() {
   if (!S.w) return 1;
   return Math.min((view.clientWidth - 8) / S.w, (view.clientHeight - 8) / S.h);
 }
-function fit() { zoom = fitZoom(); render(); view.scrollLeft = 0; view.scrollTop = 0; }
+function contentBox() {
+  const q = [...S.points, ...(S.trail || [])]; if (S.start) q.push(S.start); if (S.walkPos) q.push(S.walkPos);
+  if (!q.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  q.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  const pad = Math.max(100, (S.pxPerM || 30) * 2);
+  // extra room for labels on the right, the legend on top and the buttons at the bottom
+  return { x: x0 - pad - 120, y: y0 - pad - 90, w: x1 - x0 + 2 * pad + 420, h: y1 - y0 + 2 * pad + 220 };
+}
+function growGridTo(b) {                     // make sure the blank grid covers the box (so it can be centred)
+  if (b.x < 0) shiftAll(Math.ceil(-b.x) + 10, 0);
+  if (b.y < 0) shiftAll(0, Math.ceil(-b.y) + 10);
+  const c = contentBox();
+  if (c.x + c.w > S.w) S.w = Math.min(8000, Math.ceil(c.x + c.w + 10));
+  if (c.y + c.h > S.h) S.h = Math.min(8000, Math.ceil(c.y + c.h + 10));
+  return c;
+}
+function fit() {
+  let b = S.planKind === 'grid' ? contentBox() : null;
+  if (b) b = growGridTo(b);
+  if (!b) { zoom = fitZoom(); render(); view.scrollLeft = 0; view.scrollTop = 0; return; }
+  zoom = Math.min(3, Math.max(fitZoom(), Math.min((view.clientWidth - 8) / b.w, (view.clientHeight - 8) / b.h)));
+  render();
+  view.scrollLeft = (b.x + b.w / 2) * zoom + stage.offsetLeft - view.clientWidth / 2;
+  view.scrollTop = (b.y + b.h / 2) * zoom + stage.offsetTop - view.clientHeight / 2;
+}
 function setZoom(z, cx, cy, light) {
   const zmin = fitZoom() * 0.5, zmax = Math.max(6, fitZoom() * 10);
   z = clamp(z, zmin, zmax);
@@ -803,7 +855,7 @@ function startWalk() {
 }
 function stopWalk(quiet) {
   if (!W.on) return;
-  W.on = false; save(); updateWalkUI(); render();
+  W.on = false; save(); updateWalkUI(); if (quiet) render(); else fit();
   if (!quiet) flash(`Walk stopped: ${W.steps} steps, ${fmtFt(W.dist)}.`);
 }
 /* Tap on the map while walking = "I'm here". Also learns direction and step length from the error. */
