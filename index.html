@@ -55,6 +55,11 @@ input[type=text]{width:100%}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:15px}
 .kv b{font-weight:600}
 .muted{color:var(--muted);font-size:13px}
+#shReport .card{max-height:94dvh}
+#repImg{width:100%;border-radius:10px;border:1px solid var(--line);background:#fff;display:block;margin:8px 0}
+#repText{font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;white-space:pre;margin:8px 0;max-width:100%}
+.btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btnrow .btn{margin-top:8px}
 </style>
 </head>
 <body>
@@ -122,6 +127,24 @@ input[type=text]{width:100%}
   <div class="muted" id="pasteMsg" style="color:var(--danger)"></div>
 </div></div>
 
+<!-- Report preview sheet -->
+<div class="sheet" id="shReport"><div class="card">
+  <h2 id="repTitle">Report</h2>
+  <div class="seg" id="repSeg" style="margin:4px 0 2px">
+    <button data-rm="down">↓ Down</button><button data-rm="up">↑ Up</button><button data-rm="lat">Ping</button><button data-rm="sig">dBm</button>
+  </div>
+  <img id="repImg" alt="Heat map">
+  <pre id="repText"></pre>
+  <div class="btnrow">
+    <button class="btn primary" data-act="saveTxt">Save as text</button>
+    <button class="btn" data-act="copyTxt">Copy text</button>
+    <button class="btn" data-act="exportPng">Save image</button>
+    <button class="btn" data-act="exportCsv">Save CSV</button>
+  </div>
+  <button class="btn" data-act="exportJson">Save survey file (JSON)</button>
+  <button class="btn" data-act="close">Close</button>
+</div></div>
+
 <!-- Point sheet -->
 <div class="sheet" id="shPoint"><div class="card">
   <h2>Measurement</h2>
@@ -137,7 +160,8 @@ input[type=text]{width:100%}
   <div class="row"><input type="text" id="inName" placeholder="Survey name"></div>
 
   <h3>Export</h3>
-  <button class="btn primary" data-act="exportPng">Share heat map image</button>
+  <button class="btn primary" data-act="openReport">Preview report</button>
+  <button class="btn" data-act="exportPng">Share heat map image</button>
   <button class="btn" data-act="exportJson">Save survey file</button>
   <button class="btn" data-act="exportCsv">Export points (CSV)</button>
   <button class="btn" data-act="importJson">Open survey file</button>
@@ -174,7 +198,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
-const BUILD = '20261023-1531';
+const BUILD = '20261024-1242';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -755,7 +779,8 @@ function setTool(t) {
   render(); idleStatus();
 }
 function updateLegend() {
-  document.querySelectorAll('#metricSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === S.metric));
+  document.querySelectorAll('#repSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.rm; save(); render(); renderReport(); }));
+document.querySelectorAll('#metricSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === S.metric));
   const m = METRIC[S.metric], th = S.th[S.metric];
   $('#lgTitle').textContent = `${m.name} (${m.unit})`;
   $('#lgBad').textContent = (S.metric === 'lat' ? '≥' : '≤') + th.bad;
@@ -835,6 +860,80 @@ async function shareFile(blob, name) {
 const fileBase = () => (S.name || 'survey').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'survey';
 function exportPng() {
   if (!S.planKind) return flash('Nothing to export yet.');
+  const c = makePngCanvas();
+  shareFile(dataURLtoBlob(c.toDataURL('image/png')), `${fileBase()}-${S.metric}.png`);
+}
+
+/* ---------- text report ---------- */
+function reportText() {
+  const pad = (v, n, right) => { v = String(v); return right ? v.padStart(n) : v.padEnd(n); };
+  const f1 = v => v == null || !isFinite(v) ? '-' : (Math.abs(v) < 10 ? v.toFixed(1) : Math.round(v).toString());
+  const pts = S.points;
+  const sp = pts.filter(p => !p.fail);
+  const md = median(sp.map(p => p.down).filter(v => v != null)), mu = median(sp.map(p => p.up).filter(v => v != null)), ml = median(sp.map(p => p.lat).filter(v => v != null));
+  const ms = median(pts.filter(p => !p.noWifi).map(p => p.rssi).filter(v => v != null));
+  const dead = pts.filter(p => p.noWifi || p.fail).length;
+  const L = [];
+  L.push(`WiFi survey: ${S.name}`);
+  L.push(`Date: ${new Date().toLocaleString()}`);
+  L.push(`Points: ${pts.length}${dead ? ` (dead spots: ${dead})` : ''}`);
+  const med = [];
+  if (ms != null) med.push(`signal ${f1(ms)} dBm (${sigQuality(ms)})`);
+  if (md != null) med.push(`download ${f1(md)} Mbps`);
+  if (mu != null) med.push(`upload ${f1(mu)} Mbps`);
+  if (ml != null) med.push(`ping ${f1(ml)} ms`);
+  if (med.length) L.push(`Median: ${med.join(', ')}`);
+  const aps = [...new Set(pts.map(p => p.bssid).filter(Boolean))];
+  if (aps.length) L.push(`Access points seen: ${aps.length}`);
+  if (S.pxPerM) L.push(`Scale: set (${fmtFt(S.scaleM)} reference line)`);
+  L.push('');
+  const weak = pts.filter(p => p.noWifi || p.fail || (p.rssi != null && p.rssi < -67) || (p.down != null && p.down < S.th.down.bad));
+  if (weak.length) {
+    L.push('Weak spots:');
+    weak.forEach(p => {
+      const i = pts.indexOf(p) + 1, why = [];
+      if (p.noWifi) why.push('no Wi-Fi');
+      else if (p.rssi != null && p.rssi < -67) why.push(`signal ${f1(p.rssi)} dBm (${sigQuality(p.rssi)})`);
+      if (p.fail) why.push('no connection');
+      else if (p.down != null && p.down < S.th.down.bad) why.push(`download ${f1(p.down)} Mbps`);
+      L.push(`  #${i}: ${why.join(', ')}`);
+    });
+    L.push('');
+  } else if (pts.length) { L.push('Weak spots: none'); L.push(''); }
+  const head = [pad('#', 3), pad('X ft', 6, 1), pad('Y ft', 6, 1), pad('dBm', 5, 1), pad('Noise', 6, 1), pad('SNR', 4, 1), pad('Ch', 4, 1),
+    pad('Down', 6, 1), pad('Up', 6, 1), pad('Ping', 5, 1), '  ' + pad('Access point', 18), 'Network'];
+  L.push(head.join(' '));
+  L.push('-'.repeat(head.join(' ').length + 8));
+  pts.forEach((p, i) => {
+    const x = S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '-', y = S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '-';
+    const snr = p.rssi != null && p.noise != null ? Math.round(p.rssi - p.noise) : '-';
+    L.push([pad(i + 1, 3), pad(x, 6, 1), pad(y, 6, 1), pad(p.noWifi ? 'none' : (p.rssi ?? '-'), 5, 1), pad(p.noise ?? '-', 6, 1), pad(snr, 4, 1),
+      pad(p.ch ?? '-', 4, 1), pad(p.fail ? 'fail' : f1(p.down), 6, 1), pad(f1(p.up), 6, 1), pad(f1(p.lat), 5, 1),
+      '  ' + pad(p.bssid || '-', 18), p.ssid || '-'].join(' '));
+  });
+  L.push('');
+  L.push('Signal guide: -50 dBm or better excellent, -67 good, -75 fair, below -80 weak.');
+  return L.join('\n');
+}
+let repMetric = null;
+function openReport() {
+  if (!S.planKind) return flash('Nothing to report yet.');
+  repMetric = S.metric;
+  $('#repTitle').textContent = S.name || 'Report';
+  renderReport();
+  openSheet('#shReport');
+}
+function renderReport() {
+  document.querySelectorAll('#repSeg button').forEach(b => b.classList.toggle('on', b.dataset.rm === S.metric));
+  try { $('#repImg').src = makePngCanvas().toDataURL('image/jpeg', 0.85); } catch (e) {}
+  $('#repText').textContent = reportText();
+}
+function saveTxt() { shareFile(new Blob([reportText()], { type: 'text/plain' }), `${fileBase()}.txt`); }
+async function copyTxt() {
+  try { await navigator.clipboard.writeText(reportText()); flash('Report copied.'); }
+  catch (e) { flash('Could not copy. Use Save as text instead.'); }
+}
+function makePngCanvas() {
   const k = Math.min(1.5, 2400 / Math.max(S.w, S.h));
   const W = Math.round(S.w * k), H = Math.round(S.h * k), F = Math.round(Math.max(110, W * 0.075));
   const c = document.createElement('canvas'); c.width = W; c.height = H + F;
@@ -862,7 +961,7 @@ function exportPng() {
   g.fillStyle = '#555'; g.font = `400 ${fs * 0.75}px -apple-system, system-ui, sans-serif`;
   g.textAlign = 'left'; g.fillText((S.metric === 'lat' ? '≥' : '≤') + th.bad + ' ' + m.unit, lx, ly + lh + fs * 0.3);
   g.textAlign = 'right'; g.fillText((S.metric === 'lat' ? '≤' : '≥') + th.good + ' ' + m.unit, lx + lw, ly + lh + fs * 0.3);
-  shareFile(dataURLtoBlob(c.toDataURL('image/png')), `${fileBase()}-${S.metric}.png`);
+  return c;
 }
 function exportJson() {
   const data = Object.assign({ app: 'wifi-heatmap', version: 1, plan: planURL }, S);
@@ -902,6 +1001,9 @@ document.addEventListener('click', e => {
   else if (act === 'applyScale') applyScale();
   else if (act === 'cancelScale') cancelScale();
   else if (act === 'exportPng') exportPng();
+  else if (act === 'openReport') openReport();
+  else if (act === 'saveTxt') saveTxt();
+  else if (act === 'copyTxt') copyTxt();
   else if (act === 'exportJson') exportJson();
   else if (act === 'exportCsv') exportCsv();
   else if (act === 'retest') { const p = selPoint; openSheet(null); if (p && !busy) measureAt(p.x, p.y, p); }

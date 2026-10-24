@@ -81,6 +81,8 @@ Guide: −50 dBm or better excellent, −67 good (enough for calls), −75 fair,
 
 Distances are in **feet** by default (`24.9`, `24'10.5"`); add `m` for metres.
 
+**Report:** More → **Preview report** shows the heat map and a readable table of all points (signal, noise, SNR, channel, access point, speeds) plus a list of weak spots. From there: Save as text (.txt), Copy text, Save image, Save CSV, Save survey file (JSON).
+
 ### Notes
 - iOS does not allow web or regular apps to read Wi-Fi signal strength (dBm), so this measures real throughput and latency instead.
 - A spot where the server cannot be reached at all is saved as a dead spot (red ✕).
