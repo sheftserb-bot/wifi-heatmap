@@ -148,6 +148,7 @@ input[type=text]{width:100%}
 <!-- Point sheet -->
 <div class="sheet" id="shPoint"><div class="card">
   <h2>Measurement</h2>
+  <div class="row"><input type="text" id="inPtName" placeholder="Name this spot (e.g. Front Desk)" autocomplete="off" enterkeyhint="done"></div>
   <div class="kv" id="ptInfo"></div>
   <button class="btn primary" data-act="retest">Test again here</button>
   <button class="btn danger" data-act="delPoint">Delete point</button>
@@ -198,7 +199,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
-const BUILD = '20261024-1242';
+const BUILD = '20261024-1314';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -388,7 +389,7 @@ function drawScene(c, w, h, u, exporting) {
     c.fillStyle = col; c.fill(); c.lineWidth = 2.5 * u; c.strokeStyle = '#fff'; c.stroke();
     c.lineWidth = 1 * u; c.strokeStyle = 'rgba(0,0,0,.45)'; c.stroke();
     if (p === selPoint && !exporting) { c.beginPath(); c.arc(p.x, p.y, 13 * u, 0, Math.PI * 2); c.lineWidth = 2.5 * u; c.strokeStyle = '#2563eb'; c.stroke(); }
-    if (S.showLabels) label(c, isDead(p) ? '✕' : fmt(v, S.metric), p.x + 12 * u, p.y, u, has ? '#111' : '#8a909a', 'left');
+    if (S.showLabels) label(c, (p.name ? p.name + '  ' : '') + (isDead(p) ? '✕' : fmt(v, S.metric)), p.x + 12 * u, p.y, u, has ? '#111' : '#8a909a', 'left');
   }
   c.restore();
   if (pending && !exporting) {
@@ -771,7 +772,7 @@ function idleStatus() {
   if (md != null || mu != null) parts.push(`↓ ${fmt(md)} ↑ ${fmt(mu)} Mbps`);
   if (ml != null) parts.push(`${fmt(ml, 'lat')} ms`);
   setStatusHTML(`<div><b>${S.points.length}</b> points · median ${parts.join(' · ')}</div>` +
-    `<div class="sub">${dead ? dead + ' dead spot' + (dead > 1 ? 's' : '') + ' · ' : ''}${worst ? 'weakest ' + METRIC[S.metric].name.toLowerCase() + ': ' + fmt(valOf(worst), S.metric) + ' ' + METRIC[S.metric].unit : ''}</div>`);
+    `<div class="sub">${dead ? dead + ' dead spot' + (dead > 1 ? 's' : '') + ' · ' : ''}${worst ? 'weakest ' + METRIC[S.metric].name.toLowerCase() + ': ' + fmt(valOf(worst), S.metric) + ' ' + METRIC[S.metric].unit + (worst.name ? ' (' + esc(worst.name) + ')' : '') : ''}</div>`);
 }
 function setTool(t) {
   tool = t; tmpScale = t === 'scale' ? [] : tmpScale;
@@ -793,6 +794,8 @@ document.querySelectorAll('#metricSeg button').forEach(b => b.classList.toggle('
 function openSheet(id) { document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open')); if (id) $(id).classList.add('open'); }
 function openPoint(p) {
   selPoint = p; render();
+  $('#inPtName').value = p.name || '';
+  $('#inPtName').placeholder = `Name this spot (point ${S.points.indexOf(p) + 1}), e.g. Front Desk`;
   const lines = [];
   if (p.noWifi) lines.push(['Status', 'No Wi-Fi (dead spot)']);
   else if (p.fail) lines.push(['Status', 'No connection (dead spot)']);
@@ -896,18 +899,19 @@ function reportText() {
       else if (p.rssi != null && p.rssi < -67) why.push(`signal ${f1(p.rssi)} dBm (${sigQuality(p.rssi)})`);
       if (p.fail) why.push('no connection');
       else if (p.down != null && p.down < S.th.down.bad) why.push(`download ${f1(p.down)} Mbps`);
-      L.push(`  #${i}: ${why.join(', ')}`);
+      L.push(`  #${i}${p.name ? ' ' + p.name : ''}: ${why.join(', ')}`);
     });
     L.push('');
   } else if (pts.length) { L.push('Weak spots: none'); L.push(''); }
-  const head = [pad('#', 3), pad('X ft', 6, 1), pad('Y ft', 6, 1), pad('dBm', 5, 1), pad('Noise', 6, 1), pad('SNR', 4, 1), pad('Ch', 4, 1),
+  const nw = Math.min(20, Math.max(4, ...pts.map(p => (p.name || '').length)));
+  const head = [pad('#', 3), pad('Name', nw), pad('X ft', 6, 1), pad('Y ft', 6, 1), pad('dBm', 5, 1), pad('Noise', 6, 1), pad('SNR', 4, 1), pad('Ch', 4, 1),
     pad('Down', 6, 1), pad('Up', 6, 1), pad('Ping', 5, 1), '  ' + pad('Access point', 18), 'Network'];
   L.push(head.join(' '));
   L.push('-'.repeat(head.join(' ').length + 8));
   pts.forEach((p, i) => {
     const x = S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '-', y = S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '-';
     const snr = p.rssi != null && p.noise != null ? Math.round(p.rssi - p.noise) : '-';
-    L.push([pad(i + 1, 3), pad(x, 6, 1), pad(y, 6, 1), pad(p.noWifi ? 'none' : (p.rssi ?? '-'), 5, 1), pad(p.noise ?? '-', 6, 1), pad(snr, 4, 1),
+    L.push([pad(i + 1, 3), pad((p.name || '-').slice(0, nw), nw), pad(x, 6, 1), pad(y, 6, 1), pad(p.noWifi ? 'none' : (p.rssi ?? '-'), 5, 1), pad(p.noise ?? '-', 6, 1), pad(snr, 4, 1),
       pad(p.ch ?? '-', 4, 1), pad(p.fail ? 'fail' : f1(p.down), 6, 1), pad(f1(p.up), 6, 1), pad(f1(p.lat), 5, 1),
       '  ' + pad(p.bssid || '-', 18), p.ssid || '-'].join(' '));
   });
@@ -968,9 +972,9 @@ function exportJson() {
   shareFile(new Blob([JSON.stringify(data)], { type: 'application/json' }), `${fileBase()}.json`);
 }
 function exportCsv() {
-  const head = 'n,x_px,y_px,x_ft,y_ft,signal_dbm,noise_dbm,channel,bssid,ssid,download_mbps,upload_mbps,ping_ms,jitter_ms,no_wifi,speed_failed,time,server';
+  const head = 'n,name,x_px,y_px,x_ft,y_ft,signal_dbm,noise_dbm,channel,bssid,ssid,download_mbps,upload_mbps,ping_ms,jitter_ms,no_wifi,speed_failed,time,server';
   const q = v => /[",]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
-  const rows = S.points.map((p, i) => [i + 1, p.x.toFixed(1), p.y.toFixed(1),
+  const rows = S.points.map((p, i) => [i + 1, q(p.name || ''), p.x.toFixed(1), p.y.toFixed(1),
     S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '', S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '',
     p.rssi ?? '', p.noise ?? '', p.ch ?? '', q(p.bssid || ''), q(p.ssid || ''),
     p.down?.toFixed(2) ?? '', p.up?.toFixed(2) ?? '', p.lat?.toFixed(1) ?? '', p.jit?.toFixed(1) ?? '',
@@ -994,7 +998,7 @@ async function importJson(file) {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
-  if (act === 'close') { openSheet(null); selPoint = null; render(); }
+  if (act === 'close') { savePtName(); openSheet(null); selPoint = null; render(); }
   else if (act === 'pickPlan') { if (confirmReplace()) { openSheet(null); $('#planFile').click(); } }
   else if (act === 'blankGrid') { if (confirmReplace()) { openSheet(null); useBlankGrid(); } }
   else if (act === 'importJson') { $('#jsonFile').click(); }
@@ -1006,7 +1010,7 @@ document.addEventListener('click', e => {
   else if (act === 'copyTxt') copyTxt();
   else if (act === 'exportJson') exportJson();
   else if (act === 'exportCsv') exportCsv();
-  else if (act === 'retest') { const p = selPoint; openSheet(null); if (p && !busy) measureAt(p.x, p.y, p); }
+  else if (act === 'retest') { savePtName(); const p = selPoint; openSheet(null); if (p && !busy) measureAt(p.x, p.y, p); }
   else if (act === 'pasteSig') pasteSig();
   else if (act === 'useSig') useSig();
   else if (act === 'cancelSig') cancelSig();
@@ -1015,7 +1019,7 @@ document.addEventListener('click', e => {
   else if (act === 'clearPoints') { if (confirm('Delete all measurement points?')) { S.points = []; save(); openSheet(null); render(); idleStatus(); } }
   else if (act === 'newSurvey') { if (confirm('Start a new survey? This clears the plan and all points.')) { resetSurveyGeometry(); S.planKind = null; S.name = 'My survey'; planImg = null; planURL = null; savePlan(); save(); openSheet(null); render(); idleStatus(); } }
 });
-document.querySelectorAll('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s && s.id !== 'shPaste') { openSheet(null); selPoint = null; render(); } }));
+document.querySelectorAll('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s && s.id !== 'shPaste') { savePtName(); openSheet(null); selPoint = null; render(); } }));
 document.querySelectorAll('nav button[data-tool]').forEach(b => b.addEventListener('click', () => {
   const t = b.dataset.tool;
   if (t === 'plan') return openSheet('#shPlan');
@@ -1025,6 +1029,16 @@ document.querySelectorAll('nav button[data-tool]').forEach(b => b.addEventListen
 }));
 document.querySelectorAll('#metricSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.m; save(); render(); idleStatus(); }));
 $('#planFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadPlanFile(f); });
+function savePtName() {
+  if (!selPoint) return;
+  const n = $('#inPtName').value.trim().slice(0, 40);
+  if ((selPoint.name || '') === n) return;
+  if (n) selPoint.name = n; else delete selPoint.name;
+  save(); render();
+}
+$('#inPtName').addEventListener('change', savePtName);
+$('#inPtName').addEventListener('input', () => { clearTimeout(window.__pn); window.__pn = setTimeout(savePtName, 400); });
+$('#inPtName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); savePtName(); $('#inPtName').blur(); } });
 $('#inDist').addEventListener('keydown', e => { if (e.key === 'Enter') applyScale(); });
 $('#jsonFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importJson(f); });
 document.addEventListener('visibilitychange', () => {
