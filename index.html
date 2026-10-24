@@ -230,7 +230,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
-const BUILD = '20261024-1336';
+const BUILD = '20261024-1354';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -1121,6 +1121,12 @@ function exportPng() {
 }
 
 /* ---------- text report ---------- */
+/* position in feet: from the start point when there is one (X right, Y up), else from the top-left */
+function posFt(p) {
+  if (!S.pxPerM) return null;
+  if (S.start) return { x: ftOf((p.x - S.start.x) / S.pxPerM), y: ftOf((S.start.y - p.y) / S.pxPerM) };
+  return { x: ftOf(p.x / S.pxPerM), y: ftOf(p.y / S.pxPerM) };
+}
 function reportText() {
   const pad = (v, n, right) => { v = String(v); return right ? v.padStart(n) : v.padEnd(n); };
   const f1 = v => v == null || !isFinite(v) ? '-' : (Math.abs(v) < 10 ? v.toFixed(1) : Math.round(v).toString());
@@ -1141,7 +1147,9 @@ function reportText() {
   if (med.length) L.push(`Median: ${med.join(', ')}`);
   const aps = [...new Set(pts.map(p => p.bssid).filter(Boolean))];
   if (aps.length) L.push(`Access points seen: ${aps.length}`);
-  if (S.pxPerM) L.push(`Scale: set (${fmtFt(S.scaleM)} reference line)`);
+  if (S.pxPerM && S.scaleM) L.push(`Scale: from plan (${fmtFt(S.scaleM)} reference line)`);
+  else if (S.pxPerM && (S.trail || []).length) L.push(`Scale: from walking (step length ${fmtFt(CFG.stride)})`);
+  if (S.start && S.pxPerM) L.push('Positions: feet from the start point (X = right, Y = forward/up on the map)');
   L.push('');
   const weak = pts.filter(p => p.noWifi || p.fail || (p.rssi != null && p.rssi < -67) || (p.down != null && p.down < S.th.down.bad));
   if (weak.length) {
@@ -1156,13 +1164,13 @@ function reportText() {
     });
     L.push('');
   } else if (pts.length) { L.push('Weak spots: none'); L.push(''); }
-  const nw = Math.min(20, Math.max(4, ...pts.map(p => (p.name || '').length)));
+  const nw = Math.min(30, Math.max(4, ...pts.map(p => (p.name || '').length)));
   const head = [pad('#', 3), pad('Name', nw), pad('X ft', 6, 1), pad('Y ft', 6, 1), pad('dBm', 5, 1), pad('Noise', 6, 1), pad('SNR', 4, 1), pad('Ch', 4, 1),
     pad('Down', 6, 1), pad('Up', 6, 1), pad('Ping', 5, 1), '  ' + pad('Access point', 18), 'Network'];
   L.push(head.join(' '));
   L.push('-'.repeat(head.join(' ').length + 8));
   pts.forEach((p, i) => {
-    const x = S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '-', y = S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '-';
+    const pf = posFt(p), x = pf ? pf.x.toFixed(1) : '-', y = pf ? pf.y.toFixed(1) : '-';
     const snr = p.rssi != null && p.noise != null ? Math.round(p.rssi - p.noise) : '-';
     L.push([pad(i + 1, 3), pad((p.name || '-').slice(0, nw), nw), pad(x, 6, 1), pad(y, 6, 1), pad(p.noWifi ? 'none' : (p.rssi ?? '-'), 5, 1), pad(p.noise ?? '-', 6, 1), pad(snr, 4, 1),
       pad(p.ch ?? '-', 4, 1), pad(p.fail ? 'fail' : f1(p.down), 6, 1), pad(f1(p.up), 6, 1), pad(f1(p.lat), 5, 1),
@@ -1228,7 +1236,7 @@ function exportCsv() {
   const head = 'n,name,x_px,y_px,x_ft,y_ft,signal_dbm,noise_dbm,channel,bssid,ssid,download_mbps,upload_mbps,ping_ms,jitter_ms,no_wifi,speed_failed,time,server';
   const q = v => /[",]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
   const rows = S.points.map((p, i) => [i + 1, q(p.name || ''), p.x.toFixed(1), p.y.toFixed(1),
-    S.pxPerM ? ftOf(p.x / S.pxPerM).toFixed(1) : '', S.pxPerM ? ftOf(p.y / S.pxPerM).toFixed(1) : '',
+    posFt(p) ? posFt(p).x.toFixed(1) : '', posFt(p) ? posFt(p).y.toFixed(1) : '',
     p.rssi ?? '', p.noise ?? '', p.ch ?? '', q(p.bssid || ''), q(p.ssid || ''),
     p.down?.toFixed(2) ?? '', p.up?.toFixed(2) ?? '', p.lat?.toFixed(1) ?? '', p.jit?.toFixed(1) ?? '',
     p.noWifi ? 1 : 0, p.fail ? 1 : 0, new Date(p.t).toISOString(), p.server || ''].join(','));
