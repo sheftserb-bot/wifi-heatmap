@@ -29,6 +29,13 @@ header h1{font-size:17px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow
 #legend .bar{height:8px;border-radius:4px;background:linear-gradient(90deg,#d7191c,#f17c4a,#fdc35f,#c4e47d,#1a9641);margin:4px 0}
 #legend .lbl{display:flex;justify-content:space-between}
 .zoom{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px}
+#walkBar{position:absolute;left:10px;bottom:10px;display:flex;gap:8px;align-items:flex-end}
+#walkBar button{border:0;border-radius:22px;padding:11px 16px;font:inherit;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+#btnWalk{background:var(--panel);color:var(--text);border:1px solid var(--line)!important}
+#btnWalk.on{background:#dc2626;color:#fff}
+#btnHere{background:var(--accent);color:#fff;font-size:16px!important;padding:13px 18px!important}
+#walkHud{position:absolute;right:10px;top:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 9px;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.15);pointer-events:none;display:none;text-align:right}
+#walkHud b{font-size:14px}
 .zoom button{width:42px;height:42px;border-radius:21px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:20px;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 #empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;color:var(--muted)}
 #empty .btn{max-width:280px}
@@ -73,6 +80,8 @@ input[type=text]{width:100%}
 <div id="wrap">
   <div id="view"><div id="stage"><canvas id="cv"></canvas></div></div>
   <div id="legend"><div id="lgTitle">Download</div><div class="bar"></div><div class="lbl"><span id="lgBad"></span><span id="lgGood"></span></div></div>
+  <div id="walkBar"><button id="btnWalk">🚶 Start walk</button><button id="btnHere" style="display:none">📍 Measure here</button></div>
+  <div id="walkHud"></div>
   <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit">⤢</button></div>
   <div id="empty">
     <div style="font-size:42px">📶</div>
@@ -145,6 +154,18 @@ input[type=text]{width:100%}
   <button class="btn" data-act="close">Close</button>
 </div></div>
 
+<!-- Step calibration sheet -->
+<div class="sheet" id="shCalib"><div class="card">
+  <h2>Calibrate step length</h2>
+  <div class="muted">1. Stand at a start line (e.g. a wall). 2. Tap <b>Start counting</b> and walk normally, holding the phone in front of you, in a straight line for a distance you know (30 ft or more). 3. Tap <b>Stop</b> and type that distance.</div>
+  <div style="font-size:34px;font-weight:700;text-align:center;margin:12px 0" id="calSteps">0 steps</div>
+  <button class="btn primary" data-act="calStart" id="calBtn">Start counting</button>
+  <div class="row"><input type="text" id="inCalDist" placeholder="Distance walked, e.g. 30 ft" autocomplete="off"></div>
+  <button class="btn" data-act="calApply">Save step length</button>
+  <button class="btn" data-act="calCancel">Cancel</button>
+  <div class="muted" id="calMsg"></div>
+</div></div>
+
 <!-- Point sheet -->
 <div class="sheet" id="shPoint"><div class="card">
   <h2>Measurement</h2>
@@ -177,6 +198,16 @@ input[type=text]{width:100%}
     <select id="inSecs"><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></div>
   <div class="muted" id="serverInfo"></div>
 
+  <h3>Walking (no plan needed)</h3>
+  <div class="row"><label>Step length (ft)</label><input type="text" id="inStride" inputmode="decimal"></div>
+  <div class="row"><label for="inSnap">Snap turns to 90°</label><input type="checkbox" id="inSnap"></div>
+  <div class="row"><label>Step sensitivity</label>
+    <select id="inSens"><option value="1.4">Low</option><option value="1.0">Normal</option><option value="0.7">High</option></select></div>
+  <button class="btn" data-act="openCalib">Calibrate step length</button>
+  <button class="btn" data-act="realign">Re-align direction (face the top of the map)</button>
+  <button class="btn" data-act="clearTrail">Clear walked path</button>
+  <div class="muted">Hold the phone in front of you, screen up, top edge pointing where you walk. Walking path, steps and turns are drawn on the map. If the dot drifts, tap your real spot on the map.</div>
+
   <h3>Display</h3>
   <div class="row"><label for="inHeat">Show heat map</label><input type="checkbox" id="inHeat"></div>
   <div class="row"><label for="inLabels">Show values on points</label><input type="checkbox" id="inLabels"></div>
@@ -199,7 +230,7 @@ input[type=text]{width:100%}
 const $ = s => document.querySelector(s);
 const KEY = 'wifiheat.v1', KEYPLAN = 'wifiheat.plan.v1', KEYPEND = 'wifiheat.pendsig.v1';
 const FT = 0.3048;
-const BUILD = '20261024-1314';
+const BUILD = '20261024-1336';
 const SHORTCUT = 'WiFi Signal';
 const DEF_TH = { down: { bad: 10, good: 300 }, up: { bad: 5, good: 100 }, lat: { bad: 60, good: 5 }, sig: { bad: -80, good: -50 } };
 const METRIC = {
@@ -253,6 +284,8 @@ function setPlanURL(url) {
 }
 function resetSurveyGeometry() {
   S.points = []; S.start = null; S.pxPerM = null; S.scalePts = null; S.scaleM = null; tmpScale = [];
+  S.trail = []; S.walkPos = null; S.walkOffset = null;
+  if (typeof stopWalk === 'function') stopWalk(true);
 }
 function confirmReplace() {
   return !(S.points.length || S.start) || confirm('Replace the plan? Points, scale and start point will be cleared.');
@@ -392,6 +425,25 @@ function drawScene(c, w, h, u, exporting) {
     if (S.showLabels) label(c, (p.name ? p.name + '  ' : '') + (isDead(p) ? '✕' : fmt(v, S.metric)), p.x + 12 * u, p.y, u, has ? '#111' : '#8a909a', 'left');
   }
   c.restore();
+  // walked path and "you"
+  if (S.trail && S.trail.length > 1) {
+    c.save(); c.strokeStyle = 'rgba(37,99,235,.55)'; c.lineWidth = 3 * u; c.lineJoin = 'round'; c.lineCap = 'round';
+    c.beginPath();
+    S.trail.forEach((q, i) => { if (i === 0 || q.b) c.moveTo(q.x, q.y); else c.lineTo(q.x, q.y); });
+    c.stroke(); c.restore();
+  }
+  if (S.walkPos && !exporting) {
+    const { x, y } = S.walkPos, on = W.on;
+    c.save();
+    if (W.head != null && S.walkOffset != null) {
+      const a = (W.head - S.walkOffset) * Math.PI / 180 - Math.PI / 2;
+      c.beginPath(); c.moveTo(x, y); c.arc(x, y, 38 * u, a - 0.45, a + 0.45); c.closePath();
+      c.fillStyle = on ? 'rgba(37,99,235,.25)' : 'rgba(120,120,120,.18)'; c.fill();
+    }
+    c.beginPath(); c.arc(x, y, 9 * u, 0, Math.PI * 2);
+    c.fillStyle = on ? '#2563eb' : '#8a909a'; c.fill(); c.lineWidth = 3 * u; c.strokeStyle = '#fff'; c.stroke();
+    c.restore();
+  }
   if (pending && !exporting) {
     c.save(); c.beginPath(); c.arc(pending.x, pending.y, 11 * u, 0, Math.PI * 2);
     c.setLineDash([4 * u, 4 * u]); c.lineWidth = 3 * u; c.strokeStyle = '#2563eb'; c.stroke(); c.restore();
@@ -409,6 +461,7 @@ function sizeStage() {
 }
 function render() {
   updateLegend();
+  if (typeof updateWalkUI === 'function') updateWalkUI();
   if (!S.planKind) { $('#empty').style.display = 'flex'; cv.width = cv.height = 0; stage.style.width = stage.style.height = '0'; return; }
   $('#empty').style.display = 'none';
   sizeStage();
@@ -446,6 +499,8 @@ view.addEventListener('gesturechange', e => { e.preventDefault(); if (g0) setZoo
 view.addEventListener('gestureend', e => { e.preventDefault(); g0 = null; render(); });
 document.addEventListener('gesturestart', e => e.preventDefault());
 view.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY / 200), e.clientX, e.clientY); } }, { passive: false });
+$('#btnWalk').addEventListener('click', () => { if (W.on) stopWalk(); else startWalk(); });
+$('#btnHere').addEventListener('click', measureHere);
 $('#zin').onclick = () => setZoom(zoom * 1.4);
 $('#zout').onclick = () => setZoom(zoom / 1.4);
 $('#zfit').onclick = fit;
@@ -458,11 +513,16 @@ cv.addEventListener('click', e => {
   const x = (e.clientX - r.left) / zoom, y = (e.clientY - r.top) / zoom;
   if (x < 0 || y < 0 || x > S.w || y > S.h) return;
   if (tool === 'scale') return onScaleTap(x, y);
-  if (tool === 'start') { S.start = { x, y }; save(); setTool('measure'); flash('Start point set. Stand at a spot, tap it, and hold still while it tests.'); return; }
+  if (tool === 'start') {
+    S.start = { x, y }; save(); setTool('measure');
+    if (W.startAfter) { W.startAfter = false; S.walkPos = { x, y }; startWalk(); return; }
+    flash('Start point set. Stand at a spot, tap it, and hold still while it tests.'); return;
+  }
   if (tool === 'measure') {
     if (busy) return;
     const hit = S.points.find(p => Math.hypot(p.x - x, p.y - y) < 18 / zoom);
     if (hit) return openPoint(hit);
+    if (W.on) return correctTo(x, y);
     measureAt(x, y, null);
   }
 });
@@ -607,6 +667,194 @@ async function runTest(x, y, existing) {
   if (navigator.vibrate) navigator.vibrate(40);
   showResult(existing || res);
 }
+/* ---------- walking: step counting + compass ----------
+   Steps from the accelerometer, direction from the compass. "Up" on the map = the direction you
+   faced when the walk was first started (or re-aligned). Turns can snap to 90° for offices. */
+const KEYWALK = 'wifiheat.walkcfg.v1';
+let CFG = { stride: 0.7, snap: true, sens: 1.0 };
+try { CFG = Object.assign(CFG, JSON.parse(localStorage.getItem(KEYWALK) || '{}')); } catch (e) {}
+const saveCfg = () => { try { localStorage.setItem(KEYWALK, JSON.stringify(CFG)); } catch (e) {} };
+const W = { on: false, sensors: false, head: null, sx: 0, sy: 0, f: null, up: false, lastStep: 0,
+            steps: 0, dist: 0, anchor: null, anchorSteps: 0, startAfter: false, calib: null, lastOrient: 0, raf: 0 };
+
+function onOrient(e) {
+  let h = e.webkitCompassHeading;
+  if (h == null || isNaN(h)) { if (e.absolute && e.alpha != null) h = (360 - e.alpha) % 360; else return; }
+  const r = h * Math.PI / 180;
+  W.sx = W.head == null ? Math.sin(r) : W.sx * 0.75 + Math.sin(r) * 0.25;
+  W.sy = W.head == null ? Math.cos(r) : W.sy * 0.75 + Math.cos(r) * 0.25;
+  W.head = (Math.atan2(W.sx, W.sy) * 180 / Math.PI + 360) % 360;
+  W.lastOrient = performance.now();
+  if (W.on || S.walkPos) scheduleDraw();
+}
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  const m = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.81;
+  W.f = W.f == null ? m : W.f * 0.7 + m * 0.3;
+  const now = performance.now(), th = +CFG.sens || 1.0;
+  if (!W.up && W.f > th) W.up = true;
+  else if (W.up && W.f < 0) { W.up = false; if (now - W.lastStep > 280) { W.lastStep = now; onStep(); } }
+}
+function enableSensors() {
+  if (W.sensors) return Promise.resolve(true);
+  const asks = [];
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') asks.push(DeviceMotionEvent.requestPermission());
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') asks.push(DeviceOrientationEvent.requestPermission());
+  } catch (e) { return Promise.resolve(false); }
+  return Promise.all(asks).then(r => {
+    if (r.some(x => x !== 'granted')) return false;
+    window.addEventListener('devicemotion', onMotion);
+    window.addEventListener('deviceorientation', onOrient);
+    window.addEventListener('deviceorientationabsolute', onOrient);
+    W.sensors = true; return true;
+  }).catch(() => false);
+}
+function walkDir() {                         // degrees, 0 = up on the map, clockwise
+  if (W.head == null || S.walkOffset == null) return null;
+  let d = (W.head - S.walkOffset + 360) % 360;
+  if (CFG.snap) d = (Math.round(d / 90) * 90) % 360;
+  return d;
+}
+function onStep() {
+  if (W.calib && W.calib.on) { W.calib.steps++; $('#calSteps').textContent = W.calib.steps + ' steps'; return; }
+  if (!W.on || busy || pendSig || !S.walkPos || !S.pxPerM) return;
+  const d = walkDir();
+  W.steps++; W.anchorSteps++;
+  if (d == null) return;
+  const len = CFG.stride * S.pxPerM, r = d * Math.PI / 180;
+  S.walkPos = { x: S.walkPos.x + Math.sin(r) * len, y: S.walkPos.y - Math.cos(r) * len };
+  W.dist += CFG.stride;
+  keepInside(S.walkPos);
+  S.trail = S.trail || [];
+  S.trail.push({ x: S.walkPos.x, y: S.walkPos.y });
+  if (S.trail.length > 4000) S.trail.splice(0, 500);
+  if (W.steps % 6 === 0) save();
+  followYou(); scheduleDraw(); updateHud();
+}
+function keepInside(p) {
+  if (S.planKind !== 'grid') { p.x = clamp(p.x, 0, S.w); p.y = clamp(p.y, 0, S.h); return; }
+  const m = 150; let dx = 0, dy = 0;
+  if (p.x < m) dx = m - p.x + 300;
+  if (p.y < m) dy = m - p.y + 300;
+  if (dx || dy) shiftAll(dx, dy);
+  if (p.x > S.w - m) S.w = Math.min(8000, Math.ceil(p.x + 450));
+  if (p.y > S.h - m) S.h = Math.min(8000, Math.ceil(p.y + 450));
+}
+function shiftAll(dx, dy) {                  // grow the blank grid to the left / top
+  const mv = q => { if (q) { q.x += dx; q.y += dy; } };
+  S.points.forEach(mv); (S.trail || []).forEach(mv); mv(S.start); mv(S.walkPos); mv(pending); mv(pendSig);
+  (S.scalePts || []).forEach(mv); mv(W.anchor);
+  S.w += dx; S.h += dy; heatKey = '';
+  view.scrollLeft += dx * zoom; view.scrollTop += dy * zoom;
+}
+function followYou() {
+  if (!S.walkPos) return;
+  const vx = S.walkPos.x * zoom + stage.offsetLeft - view.scrollLeft, vy = S.walkPos.y * zoom + stage.offsetTop - view.scrollTop;
+  const mx = view.clientWidth * 0.2, my = view.clientHeight * 0.2;
+  if (vx < mx || vx > view.clientWidth - mx || vy < my || vy > view.clientHeight - my) {
+    view.scrollLeft = S.walkPos.x * zoom + stage.offsetLeft - view.clientWidth / 2;
+    view.scrollTop = S.walkPos.y * zoom + stage.offsetTop - view.clientHeight / 2;
+  }
+}
+function scheduleDraw() { if (!W.raf) W.raf = requestAnimationFrame(() => { W.raf = 0; render(); }); }
+const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+function updateHud() {
+  const hud = $('#walkHud');
+  if (!W.on) { hud.style.display = 'none'; return; }
+  const d = walkDir();
+  const dirTxt = d == null ? (W.lastOrient ? '' : 'no compass') : ARROWS[Math.round(d / 45) % 8];
+  hud.innerHTML = `<b>🚶 ${W.steps} steps · ${fmtFt(W.dist)}</b><br>${dirTxt ? 'heading ' + dirTxt : ''}`;
+  hud.style.display = 'block';
+}
+function updateWalkUI() {
+  $('#btnWalk').textContent = W.on ? '■ Stop' : (S.walkPos ? '🚶 Continue walk' : '🚶 Start walk');
+  $('#btnWalk').classList.toggle('on', W.on);
+  $('#btnHere').style.display = W.on ? '' : 'none';
+  $('#walkBar').style.display = S.planKind ? 'flex' : 'none';
+  updateHud();
+}
+function startWalk() {
+  if (!S.planKind) return flash('Load a plan or blank grid first.');
+  if (!S.pxPerM) {
+    if (S.planKind === 'grid') S.pxPerM = 30;
+    else { setTool('scale'); return flash('Set the scale first (📏: tap both ends of a known wall), then tap Start walk.'); }
+  }
+  if (!S.walkPos && !S.start) { W.startAfter = true; setTool('start'); setStatusHTML('<div><b>Tap where you are standing now.</b></div><div class="sub">Then face the top of the map and start walking.</div>'); return; }
+  const p = enableSensors();                 // ask for motion access inside the tap
+  p.then(ok => {
+    if (!ok) { flash('Motion access was not allowed. iPhone: Settings → Apps → Safari → Motion & Orientation Access → on, then reload the page.'); return; }
+    if (!S.walkPos) S.walkPos = { x: S.start.x, y: S.start.y };
+    S.trail = S.trail || [];
+    S.trail.push({ x: S.walkPos.x, y: S.walkPos.y, b: 1 });
+    W.on = true; W.steps = 0; W.dist = 0; W.anchor = { ...S.walkPos }; W.anchorSteps = 0;
+    const setDir = () => {
+      if (S.walkOffset == null) {
+        if (W.head == null) { if (W.on) setTimeout(setDir, 300); return; }
+        S.walkOffset = W.head; save();
+        flash('Direction set: the way you face now is ↑ on the map. Start walking.');
+      }
+    };
+    setDir();
+    save(); keepAwake(); updateWalkUI(); render(); idleStatus();
+    setTimeout(() => { if (W.on && !W.lastOrient) flash('No compass reading yet. Move the phone in a figure-8 and check Motion & Orientation Access is on.'); }, 4000);
+  });
+}
+function stopWalk(quiet) {
+  if (!W.on) return;
+  W.on = false; save(); updateWalkUI(); render();
+  if (!quiet) flash(`Walk stopped: ${W.steps} steps, ${fmtFt(W.dist)}.`);
+}
+/* Tap on the map while walking = "I'm here". Also learns direction and step length from the error. */
+function correctTo(x, y) {
+  const A = W.anchor, E = S.walkPos, T = { x, y };
+  let note = '';
+  if (A && E && S.pxPerM) {
+    const dE = Math.hypot(E.x - A.x, E.y - A.y), dT = Math.hypot(T.x - A.x, T.y - A.y), m3 = S.pxPerM * 3;
+    if (dE > m3 && dT > m3) {
+      let da = Math.atan2(T.x - A.x, -(T.y - A.y)) - Math.atan2(E.x - A.x, -(E.y - A.y));
+      while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      const deg = da * 180 / Math.PI;
+      if (Math.abs(deg) > 4 && Math.abs(deg) < 40 && S.walkOffset != null) { S.walkOffset = (S.walkOffset - deg + 360) % 360; note += ` Direction adjusted ${Math.round(deg)}°.`; }
+      const straight = W.anchorSteps ? dE / (W.anchorSteps * CFG.stride * S.pxPerM) : 0;
+      const ratio = dT / dE;
+      if (W.anchorSteps >= 8 && straight > 0.85 && ratio > 0.6 && ratio < 1.6) {
+        CFG.stride = +(CFG.stride * (0.5 + 0.5 * ratio)).toFixed(3); saveCfg();
+        note += ` Step length now ${fmtFt(CFG.stride)}.`;
+      }
+    }
+  }
+  S.walkPos = T;
+  (S.trail = S.trail || []).push({ x, y, b: 1 });
+  W.anchor = { x, y }; W.anchorSteps = 0;
+  save(); render(); flash('Position corrected.' + note);
+}
+function measureHere() {
+  if (!S.walkPos || busy) return;
+  measureAt(S.walkPos.x, S.walkPos.y, null);
+}
+/* step-length calibration */
+function openCalib() {
+  enableSensors().then(ok => { if (!ok) $('#calMsg').textContent = 'Motion access not allowed (Settings → Apps → Safari → Motion & Orientation Access).'; });
+  W.calib = { on: false, steps: 0 };
+  $('#calSteps').textContent = '0 steps'; $('#calBtn').textContent = 'Start counting'; $('#inCalDist').value = ''; $('#calMsg').textContent = '';
+  openSheet('#shCalib');
+}
+function calToggle() {
+  if (!W.calib) return;
+  if (!W.calib.on) { W.calib = { on: true, steps: 0 }; $('#calSteps').textContent = '0 steps'; $('#calBtn').textContent = 'Stop'; }
+  else { W.calib.on = false; $('#calBtn').textContent = 'Start counting again'; $('#inCalDist').focus(); }
+}
+function calApply() {
+  const m = parseDistance($('#inCalDist').value);
+  if (!W.calib || W.calib.steps < 8) { $('#calMsg').textContent = 'Walk at least 8–10 steps first.'; return; }
+  if (!m) { $('#calMsg').textContent = 'Type the distance you walked, e.g. 30 or 30 ft.'; return; }
+  CFG.stride = +(m / W.calib.steps).toFixed(3); saveCfg();
+  W.calib = null; openSheet(null);
+  flash(`Step length set to ${fmtFt(CFG.stride)} (${Math.round(ftOf(m))} ft in ${Math.round(m / CFG.stride)} steps).`);
+}
+
 /* ---------- Wi-Fi signal (dBm) via the iPhone Shortcuts app ----------
    iPhone does not let web pages (or normal apps) read Wi-Fi signal. The Shortcuts app can
    ("Get Network Details" → RSSI). The shortcut returns "WIFISIG;rssi;noise;channel;bssid;ssid;tx;rx".
@@ -743,18 +991,21 @@ function showResult(r) {
   clearTimeout(flashTimer);
   const hasSpeed = r.down != null || r.up != null || r.lat != null || r.fail;
   const sigTxt = r.noWifi ? '✕ No Wi-Fi' : (r.rssi != null ? `📶 ${fmt(r.rssi, 'sig')} dBm (${sigQuality(r.rssi)})` : '');
-  if (r.noWifi && !hasSpeed) setStatusHTML(`<div class="big">✕ No Wi-Fi here</div><div class="sub">Marked as a dead spot. Tap the next spot.</div>`);
-  else if (!hasSpeed) setStatusHTML(`<div class="big">${sigTxt}</div><div class="sub">Point ${S.points.length} saved${r.ch ? ' · ch ' + r.ch : ''}. Move and tap the next spot.</div>`);
-  else if (r.fail) setStatusHTML(`<div class="big">✕ No connection here${sigTxt ? ' · ' + sigTxt : ''}</div><div class="sub">Marked as a dead spot. Tap the next spot.</div>`);
-  else setStatusHTML(`<div class="big">${sigTxt ? sigTxt + ' · ' : ''}↓ ${fmt(r.down)} ↑ ${fmt(r.up)} Mbps · ${fmt(r.lat, 'lat')} ms</div><div class="sub">Point ${S.points.length} saved${r.err ? ' (partial: ' + esc(r.err) + ')' : ''}. Move and tap the next spot.</div>`);
+  if (r.noWifi && !hasSpeed) setStatusHTML(`<div class="big">✕ No Wi-Fi here</div><div class="sub">Marked as a dead spot. ${W.on ? 'Walk on.' : 'Tap the next spot.'}</div>`);
+  else if (!hasSpeed) setStatusHTML(`<div class="big">${sigTxt}</div><div class="sub">Point ${S.points.length} saved${r.ch ? ' · ch ' + r.ch : ''}. ${W.on ? 'Walk to the next spot.' : 'Move and tap the next spot.'}</div>`);
+  else if (r.fail) setStatusHTML(`<div class="big">✕ No connection here${sigTxt ? ' · ' + sigTxt : ''}</div><div class="sub">Marked as a dead spot. ${W.on ? 'Walk on.' : 'Tap the next spot.'}</div>`);
+  else setStatusHTML(`<div class="big">${sigTxt ? sigTxt + ' · ' : ''}↓ ${fmt(r.down)} ↑ ${fmt(r.up)} Mbps · ${fmt(r.lat, 'lat')} ms</div><div class="sub">Point ${S.points.length} saved${r.err ? ' (partial: ' + esc(r.err) + ')' : ''}. ${W.on ? 'Walk to the next spot.' : 'Move and tap the next spot.'}</div>`);
   flashTimer = setTimeout(idleStatus, 8000);
 }
 function idleStatus() {
   if (busy) return;
   if (!S.planKind) return setStatusHTML('<div>Load a floor plan to begin.</div>');
   if (tool === 'scale') {
-    const cur = S.pxPerM ? `<div class="sub">Current scale: ${fmtFt(S.scaleM)} line. Optional, but it makes the map more accurate.</div>` : '<div class="sub">Optional, but it makes the heat spread realistically.</div>';
+    const cur = S.pxPerM && S.scaleM ? `<div class="sub">Current scale: ${fmtFt(S.scaleM)} line. Optional, but it makes the map more accurate.</div>` : '<div class="sub">Optional, but it makes the heat spread realistically.</div>';
     return setStatusHTML(`<div><b>Scale:</b> tap both ends of something you know the length of (a wall, a door).</div>${cur}`);
+  }
+  if (W.on && tool === 'measure') {
+    return setStatusHTML(`<div><b>Walking.</b> Stop where you want to test and tap <b>📍 Measure here</b>.</div><div class="sub">Dot in the wrong place? Tap your real spot on the map to correct it.${S.points.length ? ' · ' + S.points.length + ' points' : ''}</div>`);
   }
   if (tool === 'start') return setStatusHTML('<div><b>Step 1:</b> tap the plan where you are standing now (start point).</div><div class="sub">Optional first: 📏 Scale. Then measuring begins.</div>');
   if (!S.points.length) {
@@ -780,8 +1031,7 @@ function setTool(t) {
   render(); idleStatus();
 }
 function updateLegend() {
-  document.querySelectorAll('#repSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.rm; save(); render(); renderReport(); }));
-document.querySelectorAll('#metricSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === S.metric));
+  document.querySelectorAll('#metricSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === S.metric));
   const m = METRIC[S.metric], th = S.th[S.metric];
   $('#lgTitle').textContent = `${m.name} (${m.unit})`;
   $('#lgBad').textContent = (S.metric === 'lat' ? '≥' : '≤') + th.bad;
@@ -825,6 +1075,7 @@ function openMenu() {
   $('#thLatBad').value = S.th.lat.bad; $('#thLatGood').value = S.th.lat.good;
   $('#thSigBad').value = S.th.sig.bad; $('#thSigGood').value = S.th.sig.good;
   $('#inMode').value = S.mode || 'speed';
+  $('#inStride').value = ftOf(CFG.stride).toFixed(2); $('#inSnap').checked = !!CFG.snap; $('#inSens').value = String(CFG.sens);
   $('#serverInfo').textContent = 'Local = pure Wi-Fi speed to a computer on your network (run server.py). Internet = speed to Cloudflare, limited by your internet plan.' + (epMode ? ` Auto found: ${epMode === 'local' ? 'local server' : 'Cloudflare'}.` : '');
   $('#buildInfo').textContent = 'Version ' + BUILD;
   openSheet('#shMenu');
@@ -841,9 +1092,11 @@ function readMenu() {
   const neg = (id, d) => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) && v !== 0 ? -Math.abs(v) : d; };
   S.th.sig = { bad: neg('#thSigBad', -80), good: neg('#thSigGood', -50) };
   S.mode = $('#inMode').value;
+  const st = parseDistance($('#inStride').value); if (st && st > 0.2 && st < 1.5) CFG.stride = st;
+  CFG.snap = $('#inSnap').checked; CFG.sens = +$('#inSens').value || 1.0; saveCfg();
   save(); render(); idleStatus();
 }
-['#inName', '#inServer', '#inSecs', '#inHeat', '#inLabels', '#thDownBad', '#thDownGood', '#thUpBad', '#thUpGood', '#thLatBad', '#thLatGood', '#thSigBad', '#thSigGood', '#inMode']
+['#inName', '#inServer', '#inSecs', '#inHeat', '#inLabels', '#thDownBad', '#thDownGood', '#thUpBad', '#thUpGood', '#thLatBad', '#thLatGood', '#thSigBad', '#thSigGood', '#inMode', '#inStride', '#inSnap', '#inSens']
   .forEach(id => $(id).addEventListener('change', readMenu));
 
 /* ---------- export / import ---------- */
@@ -1006,6 +1259,12 @@ document.addEventListener('click', e => {
   else if (act === 'cancelScale') cancelScale();
   else if (act === 'exportPng') exportPng();
   else if (act === 'openReport') openReport();
+  else if (act === 'openCalib') openCalib();
+  else if (act === 'calStart') calToggle();
+  else if (act === 'calApply') calApply();
+  else if (act === 'calCancel') { W.calib = null; openSheet(null); }
+  else if (act === 'realign') { if (W.head == null) { enableSensors(); flash('Waiting for the compass… try again in a moment.'); } else { S.walkOffset = W.head; save(); openSheet(null); render(); flash('Direction re-aligned: the way you face now is ↑ on the map.'); } }
+  else if (act === 'clearTrail') { S.trail = []; save(); openSheet(null); render(); flash('Walked path cleared.'); }
   else if (act === 'saveTxt') saveTxt();
   else if (act === 'copyTxt') copyTxt();
   else if (act === 'exportJson') exportJson();
@@ -1027,6 +1286,7 @@ document.querySelectorAll('nav button[data-tool]').forEach(b => b.addEventListen
   if (!S.planKind) return flash('Load a floor plan or blank grid first.');
   setTool(t);
 }));
+document.querySelectorAll('#repSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.rm; save(); render(); renderReport(); }));
 document.querySelectorAll('#metricSeg button').forEach(b => b.addEventListener('click', () => { S.metric = b.dataset.m; save(); render(); idleStatus(); }));
 $('#planFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadPlanFile(f); });
 function savePtName() {

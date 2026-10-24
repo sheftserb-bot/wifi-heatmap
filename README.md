@@ -81,6 +81,8 @@ Guide: −50 dBm or better excellent, −67 good (enough for calls), −75 fair,
 
 Distances are in **feet** by default (`24.9`, `24'10.5"`); add `m` for metres.
 
+**Walking mode (no plan needed):** tap **🚶 Start walk**, tap where you stand, face the top of the map and walk. Steps (accelerometer) × step length give distance, the compass gives direction; turns snap to 90° by default. Tap **📍 Measure here** to test where you are. If the dot drifts, tap your real spot: the app corrects the position and learns compass offset and step length. Calibrate step length in More → Walking. The blank grid grows as you walk.
+
 **Report:** More → **Preview report** shows the heat map and a readable table of all points (signal, noise, SNR, channel, access point, speeds) plus a list of weak spots. From there: Save as text (.txt), Copy text, Save image, Save CSV, Save survey file (JSON).
 
 ### Notes
